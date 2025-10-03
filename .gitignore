@@ -1,13 +1,60 @@
+# Environment files - PENTING! Berisi API keys sensitif
 .env*
+!.env.example
 
-frontend/node_modules
-# Build outputs
+# Python virtual environment
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Django specific
+backend/db.sqlite3
+backend/*/migrations/*
+!backend/*/migrations/__init__.py
+
+# Frontend dependencies dan build
+frontend/node_modules/
 frontend/dist/
 frontend/build/
+frontend/.vite/
+frontend/coverage/
 
-# Logs
+# Frontend logs
 frontend/npm-debug.log*
 frontend/yarn-debug.log*
 frontend/yarn-error.log*
 frontend/pnpm-debug.log*
 frontend/lerna-debug.log*
+
+# Training data - File besar dan tidak perlu
+training/data/raw/
+training/data/processed/
+training/models/
+training/checkpoints/
+training/logs/
+
+# IDE/Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+*.tmp
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+cache/

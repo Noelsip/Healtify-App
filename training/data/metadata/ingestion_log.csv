@@ -1,0 +1,104 @@
+timestamp,source,query,file,status,notes
+2025-10-03T19:42:14.057853,pubmed,covid-19,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\pubmed_covid-19_1759520534.xml,success,5 articles retrieved.
+2025-10-03T19:42:16.312860,crossref,covid-19,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_covid-19_1759520536.json,success,5 articles retrieved.
+2025-10-03T19:54:20.443818+00:00,pubmed,covid-19,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\pubmed_covid-19_1759521260.xml,success,5 articles retrieved.
+2025-10-03T19:54:22.552924+00:00,crossref,covid-19,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_covid-19_1759521262.json,success,5 articles retrieved.
+2025-10-03T19:54:25.168012+00:00,semantic_scholar,covid-19,,error,400 Client Error: Bad Request for url: https://api.semanticscholar.org/graph/v1/paper/search?query=covid-19&limit=5&fields=title%2Cabstract%2Cauthors%2Cyear%2Cdoi%2Curl
+2025-10-03T19:54:28.345106+00:00,pubmed,machine learning in healthcare,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\pubmed_machine_learning_in_healthcare_1759521268.xml,success,5 articles retrieved.
+2025-10-03T19:54:30.360009+00:00,crossref,machine learning in healthcare,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_machine_learning_in_healthcare_1759521270.json,success,5 articles retrieved.
+2025-10-03T19:54:32.724240+00:00,semantic_scholar,machine learning in healthcare,,error,400 Client Error: Bad Request for url: https://api.semanticscholar.org/graph/v1/paper/search?query=machine+learning+in+healthcare&limit=5&fields=title%2Cabstract%2Cauthors%2Cyear%2Cdoi%2Curl
+2025-10-03T19:54:36.178716+00:00,pubmed,causes of diabetes,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\pubmed_causes_of_diabetes_1759521276.xml,success,5 articles retrieved.
+2025-10-03T19:54:38.184292+00:00,crossref,causes of diabetes,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_causes_of_diabetes_1759521278.json,success,5 articles retrieved.
+2025-10-03T19:54:40.722637+00:00,semantic_scholar,causes of diabetes,,error,400 Client Error: Bad Request for url: https://api.semanticscholar.org/graph/v1/paper/search?query=causes+of+diabetes&limit=5&fields=title%2Cabstract%2Cauthors%2Cyear%2Cdoi%2Curl
+2025-10-03T19:54:44.213714+00:00,pubmed,mental health and exercise,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\pubmed_mental_health_and_exercise_1759521284.xml,success,5 articles retrieved.
+2025-10-03T19:54:46.217960+00:00,crossref,mental health and exercise,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_mental_health_and_exercise_1759521286.json,success,5 articles retrieved.
+2025-10-03T19:54:48.670042+00:00,semantic_scholar,mental health and exercise,,error,400 Client Error: Bad Request for url: https://api.semanticscholar.org/graph/v1/paper/search?query=mental+health+and+exercise&limit=5&fields=title%2Cabstract%2Cauthors%2Cyear%2Cdoi%2Curl
+2025-10-03T20:31:32.454413+00:00,pubmed,covid-19,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\pubmed_covid-19_1759523492.xml,success,5 articles retrieved.
+2025-10-03T20:48:25.518494+00:00,pubmed,covid-19,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\pubmed_covid-19_1759524505.xml,success,5 articles retrieved.
+2025-10-03T20:48:27.661764+00:00,crossref,covid-19,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_covid-19_1759524507.json,success,5 articles retrieved.
+2025-10-03T20:48:30.241471+00:00,semantic_scholar,covid-19,,error,400 Client Error: Bad Request for url: https://api.semanticscholar.org/graph/v1/paper/search?query=covid-19&limit=5&fields=title%2Cabstract%2Cauthors%2Cyear%2Cdoi%2Curl
+2025-10-03T20:48:33.364598+00:00,pubmed,machine learning in healthcare,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\pubmed_machine_learning_in_healthcare_1759524513.xml,success,5 articles retrieved.
+2025-10-03T20:48:35.360288+00:00,crossref,machine learning in healthcare,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_machine_learning_in_healthcare_1759524515.json,success,5 articles retrieved.
+2025-10-03T20:48:37.743210+00:00,semantic_scholar,machine learning in healthcare,,error,400 Client Error: Bad Request for url: https://api.semanticscholar.org/graph/v1/paper/search?query=machine+learning+in+healthcare&limit=5&fields=title%2Cabstract%2Cauthors%2Cyear%2Cdoi%2Curl
+2025-10-03T20:48:41.494427+00:00,pubmed,causes of diabetes,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\pubmed_causes_of_diabetes_1759524521.xml,success,5 articles retrieved.
+2025-10-03T20:48:43.569531+00:00,crossref,causes of diabetes,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_causes_of_diabetes_1759524523.json,success,5 articles retrieved.
+2025-10-03T20:48:46.006747+00:00,semantic_scholar,causes of diabetes,,error,400 Client Error: Bad Request for url: https://api.semanticscholar.org/graph/v1/paper/search?query=causes+of+diabetes&limit=5&fields=title%2Cabstract%2Cauthors%2Cyear%2Cdoi%2Curl
+2025-10-03T20:48:49.462373+00:00,pubmed,mental health and exercise,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\pubmed_mental_health_and_exercise_1759524529.xml,success,5 articles retrieved.
+2025-10-03T20:48:51.473799+00:00,crossref,mental health and exercise,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_mental_health_and_exercise_1759524531.json,success,5 articles retrieved.
+2025-10-03T20:48:53.776528+00:00,semantic_scholar,mental health and exercise,,error,400 Client Error: Bad Request for url: https://api.semanticscholar.org/graph/v1/paper/search?query=mental+health+and+exercise&limit=5&fields=title%2Cabstract%2Cauthors%2Cyear%2Cdoi%2Curl
+2025-10-03T20:49:12.419274+00:00,pubmed,covid-19,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\pubmed_covid-19_1759524552.xml,success,5 articles retrieved.
+2025-10-03T20:49:14.423805+00:00,crossref,covid-19,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_covid-19_1759524554.json,success,5 articles retrieved.
+2025-10-03T20:49:21.022748+00:00,semantic_scholar,covid-19,,error,400 Client Error: Bad Request for url: https://api.semanticscholar.org/graph/v1/paper/search?query=covid-19&limit=5&fields=title%2Cabstract%2Cauthors%2Cyear%2Cdoi%2Curl
+2025-10-03T20:49:24.126992+00:00,pubmed,machine learning in healthcare,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\pubmed_machine_learning_in_healthcare_1759524564.xml,success,5 articles retrieved.
+2025-10-03T20:49:26.157148+00:00,crossref,machine learning in healthcare,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_machine_learning_in_healthcare_1759524566.json,success,5 articles retrieved.
+2025-10-03T20:49:32.705904+00:00,semantic_scholar,machine learning in healthcare,,error,400 Client Error: Bad Request for url: https://api.semanticscholar.org/graph/v1/paper/search?query=machine+learning+in+healthcare&limit=5&fields=title%2Cabstract%2Cauthors%2Cyear%2Cdoi%2Curl
+2025-10-03T20:49:36.188248+00:00,pubmed,causes of diabetes,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\pubmed_causes_of_diabetes_1759524576.xml,success,5 articles retrieved.
+2025-10-03T20:49:38.285845+00:00,crossref,causes of diabetes,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_causes_of_diabetes_1759524578.json,success,5 articles retrieved.
+2025-10-03T20:49:44.632658+00:00,semantic_scholar,causes of diabetes,,error,400 Client Error: Bad Request for url: https://api.semanticscholar.org/graph/v1/paper/search?query=causes+of+diabetes&limit=5&fields=title%2Cabstract%2Cauthors%2Cyear%2Cdoi%2Curl
+2025-10-03T20:49:48.139553+00:00,pubmed,mental health and exercise,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\pubmed_mental_health_and_exercise_1759524588.xml,success,5 articles retrieved.
+2025-10-03T20:49:50.162102+00:00,crossref,mental health and exercise,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_mental_health_and_exercise_1759524590.json,success,5 articles retrieved.
+2025-10-03T20:49:56.472969+00:00,semantic_scholar,mental health and exercise,,error,400 Client Error: Bad Request for url: https://api.semanticscholar.org/graph/v1/paper/search?query=mental+health+and+exercise&limit=5&fields=title%2Cabstract%2Cauthors%2Cyear%2Cdoi%2Curl
+2025-10-03T20:50:05.992416+00:00,pubmed,covid-19,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\pubmed_covid-19_1759524605.xml,success,5 articles retrieved.
+2025-10-03T20:50:14.196782+00:00,crossref,covid-19,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_covid-19_1759524614.json,success,5 articles retrieved.
+2025-10-03T20:50:20.661454+00:00,semantic_scholar,covid-19,,error,400 Client Error: Bad Request for url: https://api.semanticscholar.org/graph/v1/paper/search?query=covid-19&limit=5&fields=title%2Cabstract%2Cauthors%2Cyear%2Cdoi%2Curl%2Cvenue
+2025-10-03T20:50:23.812217+00:00,pubmed,machine learning in healthcare,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\pubmed_machine_learning_in_healthcare_1759524623.xml,success,5 articles retrieved.
+2025-10-03T20:50:26.079071+00:00,crossref,machine learning in healthcare,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_machine_learning_in_healthcare_1759524626.json,success,5 articles retrieved.
+2025-10-03T20:50:32.636980+00:00,semantic_scholar,machine learning in healthcare,,error,400 Client Error: Bad Request for url: https://api.semanticscholar.org/graph/v1/paper/search?query=machine+learning+in+healthcare&limit=5&fields=title%2Cabstract%2Cauthors%2Cyear%2Cdoi%2Curl%2Cvenue
+2025-10-03T20:50:36.188082+00:00,pubmed,causes of diabetes,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\pubmed_causes_of_diabetes_1759524636.xml,success,5 articles retrieved.
+2025-10-03T20:50:38.196498+00:00,crossref,causes of diabetes,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_causes_of_diabetes_1759524638.json,success,5 articles retrieved.
+2025-10-03T20:50:44.820301+00:00,semantic_scholar,causes of diabetes,,error,400 Client Error: Bad Request for url: https://api.semanticscholar.org/graph/v1/paper/search?query=causes+of+diabetes&limit=5&fields=title%2Cabstract%2Cauthors%2Cyear%2Cdoi%2Curl%2Cvenue
+2025-10-03T20:50:48.341223+00:00,pubmed,mental health and exercise,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\pubmed_mental_health_and_exercise_1759524648.xml,success,5 articles retrieved.
+2025-10-03T20:50:50.604052+00:00,crossref,mental health and exercise,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_mental_health_and_exercise_1759524650.json,success,5 articles retrieved.
+2025-10-03T20:50:57.070458+00:00,semantic_scholar,mental health and exercise,,error,400 Client Error: Bad Request for url: https://api.semanticscholar.org/graph/v1/paper/search?query=mental+health+and+exercise&limit=5&fields=title%2Cabstract%2Cauthors%2Cyear%2Cdoi%2Curl%2Cvenue
+2025-10-03T20:57:20.247083+00:00,pubmed,covid-19,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\pubmed_covid-19_1759525040.xml,success,5 articles retrieved.
+2025-10-03T20:57:22.392311+00:00,crossref,covid-19,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_covid-19_1759525042.json,success,5 articles retrieved.
+2025-10-03T20:57:25.931252+00:00,semantic_scholar,covid-19,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-03T20:57:27.049965+00:00,semantic_scholar,covid-19,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-03T20:57:27.930064+00:00,semantic_scholar,covid-19,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-03T20:57:28.833483+00:00,semantic_scholar,covid-19,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-03T20:57:29.714454+00:00,semantic_scholar,covid-19,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-03T20:57:29.916290+00:00,semantic_scholar,covid-19,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\semantic_scholar_covid-19_1759525049.json,success,"search_returned:5, details_returned:0"
+2025-10-03T20:57:33.061007+00:00,pubmed,machine learning in healthcare,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\pubmed_machine_learning_in_healthcare_1759525053.xml,success,5 articles retrieved.
+2025-10-03T20:57:35.093198+00:00,crossref,machine learning in healthcare,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_machine_learning_in_healthcare_1759525055.json,success,5 articles retrieved.
+2025-10-03T20:57:37.666395+00:00,semantic_scholar,machine learning in healthcare,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-03T20:57:38.549859+00:00,semantic_scholar,machine learning in healthcare,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-03T20:57:39.095553+00:00,semantic_scholar,machine learning in healthcare,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-03T20:57:39.985434+00:00,semantic_scholar,machine learning in healthcare,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-03T20:57:40.893089+00:00,semantic_scholar,machine learning in healthcare,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-03T20:57:41.095805+00:00,semantic_scholar,machine learning in healthcare,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\semantic_scholar_machine_learning_in_healthcare_1759525061.json,success,"search_returned:5, details_returned:0"
+2025-10-03T20:57:44.530830+00:00,pubmed,causes of diabetes,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\pubmed_causes_of_diabetes_1759525064.xml,success,5 articles retrieved.
+2025-10-03T20:57:46.539910+00:00,crossref,causes of diabetes,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_causes_of_diabetes_1759525066.json,success,5 articles retrieved.
+2025-10-03T20:57:49.816332+00:00,semantic_scholar,causes of diabetes,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-03T20:57:50.386359+00:00,semantic_scholar,causes of diabetes,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-03T20:57:51.268253+00:00,semantic_scholar,causes of diabetes,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-03T20:57:52.153237+00:00,semantic_scholar,causes of diabetes,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-03T20:57:53.099081+00:00,semantic_scholar,causes of diabetes,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-03T20:57:53.302477+00:00,semantic_scholar,causes of diabetes,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\semantic_scholar_causes_of_diabetes_1759525073.json,success,"search_returned:5, details_returned:0"
+2025-10-03T20:57:56.741804+00:00,pubmed,mental health and exercise,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\pubmed_mental_health_and_exercise_1759525076.xml,success,5 articles retrieved.
+2025-10-03T20:57:58.745013+00:00,crossref,mental health and exercise,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_mental_health_and_exercise_1759525078.json,success,5 articles retrieved.
+2025-10-03T20:58:01.906548+00:00,semantic_scholar,mental health and exercise,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-03T20:58:02.824212+00:00,semantic_scholar,mental health and exercise,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-03T20:58:03.360206+00:00,semantic_scholar,mental health and exercise,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-03T20:58:03.985834+00:00,semantic_scholar,mental health and exercise,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-03T20:58:04.541516+00:00,semantic_scholar,mental health and exercise,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-03T20:58:04.745310+00:00,semantic_scholar,mental health and exercise,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\semantic_scholar_mental_health_and_exercise_1759525084.json,success,"search_returned:5, details_returned:0"

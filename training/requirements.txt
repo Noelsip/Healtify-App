@@ -1,0 +1,21 @@
+# langchain core
+langchain>=0.3,<0.4
+
+# Google Gemini integration
+google-genai>=0.7.0
+langchain-google-genai>=2.0.0
+
+# Vectorstores / embeddings
+sentence-transformers
+faiss-cpu
+pgvector
+psycopg2-binary
+
+# ML / utils
+torch
+transformers
+scikit-learn
+pandas
+numpy
+tqdm
+python-dotenv

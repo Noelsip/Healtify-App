@@ -1,0 +1,17 @@
+# djanggo library
+Django>=4.2,<5.0
+djangorestframework
+django-cors-headers
+django-environ
+
+# database library
+psycopg2-binary
+pgvector
+
+# production server
+gunicorn
+
+# Utilities
+python-dotenv
+requests
+httpx

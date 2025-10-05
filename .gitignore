@@ -58,3 +58,6 @@ logs/
 tmp/
 temp/
 cache/
+
+/training/data/pdf/*.pdf
+/training/data/txt/*.txt

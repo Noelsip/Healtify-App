@@ -34,6 +34,7 @@ frontend/lerna-debug.log*
 
 # Training data - File besar dan tidak perlu
 training/data/raw/
+training/data/chunks/
 training/data/processed/
 training/models/
 training/checkpoints/
@@ -61,3 +62,5 @@ cache/
 
 /training/data/pdf/*.pdf
 /training/data/txt/*.txt
+/training/scripts/__pycache__/
+/training/scripts/*.pyc

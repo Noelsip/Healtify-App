@@ -308,6 +308,7 @@ if __name__ == "__main__":
         "machine learning in healthcare",
         "causes of diabetes",
         "mental health and exercise",
+        "advancements in cancer treatment"
     ]
 
     # query dengan progress bar

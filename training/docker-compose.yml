@@ -1,0 +1,28 @@
+version: '3.8'
+services:
+  db:
+    image: ankane/pgvector:latest
+    container_name: healthify_pg
+    environment:
+      POSTGRES_USER: healthify
+      POSTGRES_PASSWORD: healthify_pwd
+      POSTGRES_DB: healthifydb
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: healthify_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: "noelsipayung45@gmail.com"
+      PGADMIN_DEFAULT_PASSWORD: "@dm1n123"
+    ports:
+      - "8080:80"
+    depends_on:
+      - db
+  
+volumes:
+  pgdata:

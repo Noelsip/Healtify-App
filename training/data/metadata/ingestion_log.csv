@@ -349,3 +349,411 @@ timestamp,source,query,file,status,notes
 2025-10-09T12:37:11.153706+00:00,semantic_scholar,rokok menyebabkan kanker,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
 "
 2025-10-09T12:37:11.356422+00:00,semantic_scholar,rokok menyebabkan kanker,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\semantic_scholar_rokok_menyebabkan_kanker_1760013431.json,success,"search_returned:5, details_returned:0"
+2025-10-10T17:49:06.418515+00:00,pubmed,perut kosong menyebabkan asam lambung,,no results,No articles found for the given query.
+2025-10-10T17:49:14.458295+00:00,crossref,perut kosong menyebabkan asam lambung,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_perut_kosong_menyebabkan_asam_lambung_1760118554.json,success,30 articles retrieved.
+2025-10-10T17:49:17.771543+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T17:49:18.333342+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T17:49:19.588229+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T17:49:20.509008+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T17:49:21.518525+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T17:49:22.415479+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T17:49:23.325099+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T17:49:24.258115+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T17:49:25.186388+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T17:49:26.114477+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T17:49:26.683196+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T17:49:29.277404+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T17:49:30.166038+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T17:49:31.112580+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T17:49:32.032706+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T17:49:32.602187+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T17:49:32.805180+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\semantic_scholar_perut_kosong_menyebabkan_asam_lambung_1760118572.json,success,"search_returned:16, details_returned:0"
+2025-10-10T17:50:24.909740+00:00,pubmed,perut lapar menyebabkan asam lambung,,no results,No articles found for the given query.
+2025-10-10T17:50:27.285090+00:00,crossref,perut lapar menyebabkan asam lambung,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_perut_lapar_menyebabkan_asam_lambung_1760118627.json,success,30 articles retrieved.
+2025-10-10T17:50:29.341046+00:00,semantic_scholar,perut lapar menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T17:50:30.258575+00:00,semantic_scholar,perut lapar menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T17:50:32.522396+00:00,semantic_scholar,perut lapar menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T17:50:35.120360+00:00,semantic_scholar,perut lapar menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T17:50:36.041667+00:00,semantic_scholar,perut lapar menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T17:50:36.668184+00:00,semantic_scholar,perut lapar menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T17:50:37.214346+00:00,semantic_scholar,perut lapar menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T17:50:38.118063+00:00,semantic_scholar,perut lapar menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T17:50:39.042575+00:00,semantic_scholar,perut lapar menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T17:50:39.956960+00:00,semantic_scholar,perut lapar menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T17:50:40.938506+00:00,semantic_scholar,perut lapar menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T17:50:41.849331+00:00,semantic_scholar,perut lapar menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T17:50:42.051686+00:00,semantic_scholar,perut lapar menyebabkan asam lambung,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\semantic_scholar_perut_lapar_menyebabkan_asam_lambung_1760118642.json,success,"search_returned:12, details_returned:0"
+2025-10-10T18:02:30.055238+00:00,pubmed,perut kosong menyebabkan asam lambung,,no results,No articles found for the given query.
+2025-10-10T18:02:32.372289+00:00,crossref,perut kosong menyebabkan asam lambung,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_perut_kosong_menyebabkan_asam_lambung_1760119352.json,success,30 articles retrieved.
+2025-10-10T18:02:36.364289+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:02:37.476619+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:02:38.486729+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:02:39.476527+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:02:40.143994+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:02:40.808674+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:02:41.850348+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:02:42.917856+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:02:43.576138+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:02:44.593925+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:02:45.627827+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:02:46.629993+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:02:47.672437+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:02:48.686517+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:02:49.688062+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:02:50.698020+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:02:50.901621+00:00,semantic_scholar,perut kosong menyebabkan asam lambung,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\semantic_scholar_perut_kosong_menyebabkan_asam_lambung_1760119370.json,success,"search_returned:16, details_returned:0"
+2025-10-10T18:09:20.342317+00:00,pubmed,lebih berbahaya rokok atau vape,,no results,No articles found for the given query.
+2025-10-10T18:09:22.500388+00:00,crossref,lebih berbahaya rokok atau vape,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_lebih_berbahaya_rokok_atau_vape_1760119762.json,success,30 articles retrieved.
+2025-10-10T18:09:26.658592+00:00,semantic_scholar,lebih berbahaya rokok atau vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:09:27.910642+00:00,semantic_scholar,lebih berbahaya rokok atau vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:09:29.120927+00:00,semantic_scholar,lebih berbahaya rokok atau vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:09:30.036727+00:00,semantic_scholar,lebih berbahaya rokok atau vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:09:31.287557+00:00,semantic_scholar,lebih berbahaya rokok atau vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:09:32.972552+00:00,semantic_scholar,lebih berbahaya rokok atau vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:09:33.907173+00:00,semantic_scholar,lebih berbahaya rokok atau vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:09:34.502233+00:00,semantic_scholar,lebih berbahaya rokok atau vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:09:35.455535+00:00,semantic_scholar,lebih berbahaya rokok atau vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:09:36.277729+00:00,semantic_scholar,lebih berbahaya rokok atau vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:09:37.712011+00:00,semantic_scholar,lebih berbahaya rokok atau vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:09:39.014135+00:00,semantic_scholar,lebih berbahaya rokok atau vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:09:40.311147+00:00,semantic_scholar,lebih berbahaya rokok atau vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:09:41.106185+00:00,semantic_scholar,lebih berbahaya rokok atau vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:09:42.306553+00:00,semantic_scholar,lebih berbahaya rokok atau vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:09:43.254598+00:00,semantic_scholar,lebih berbahaya rokok atau vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:09:44.171103+00:00,semantic_scholar,lebih berbahaya rokok atau vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:09:45.342098+00:00,semantic_scholar,lebih berbahaya rokok atau vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:09:46.634949+00:00,semantic_scholar,lebih berbahaya rokok atau vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:09:47.386499+00:00,semantic_scholar,lebih berbahaya rokok atau vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:09:48.739081+00:00,semantic_scholar,lebih berbahaya rokok atau vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:09:50.115758+00:00,semantic_scholar,lebih berbahaya rokok atau vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:09:51.553707+00:00,semantic_scholar,lebih berbahaya rokok atau vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:09:52.606769+00:00,semantic_scholar,lebih berbahaya rokok atau vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:09:53.911064+00:00,semantic_scholar,lebih berbahaya rokok atau vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:09:55.188400+00:00,semantic_scholar,lebih berbahaya rokok atau vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:09:56.382620+00:00,semantic_scholar,lebih berbahaya rokok atau vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:09:57.505652+00:00,semantic_scholar,lebih berbahaya rokok atau vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:09:59.717498+00:00,semantic_scholar,lebih berbahaya rokok atau vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:10:00.848209+00:00,semantic_scholar,lebih berbahaya rokok atau vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:10:01.053843+00:00,semantic_scholar,lebih berbahaya rokok atau vape,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\semantic_scholar_lebih_berbahaya_rokok_atau_vape_1760119801.json,success,"search_returned:30, details_returned:0"
+2025-10-10T18:22:27.939273+00:00,pubmed,rokok lebih berbahaya daripada vape,,no results,No articles found for the given query.
+2025-10-10T18:22:30.041544+00:00,crossref,rokok lebih berbahaya daripada vape,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_rokok_lebih_berbahaya_daripada_vape_1760120550.json,success,30 articles retrieved.
+2025-10-10T18:22:33.669611+00:00,semantic_scholar,rokok lebih berbahaya daripada vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:22:34.311428+00:00,semantic_scholar,rokok lebih berbahaya daripada vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:22:35.232567+00:00,semantic_scholar,rokok lebih berbahaya daripada vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:22:36.173915+00:00,semantic_scholar,rokok lebih berbahaya daripada vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:22:37.079880+00:00,semantic_scholar,rokok lebih berbahaya daripada vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:22:38.009960+00:00,semantic_scholar,rokok lebih berbahaya daripada vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:22:38.944642+00:00,semantic_scholar,rokok lebih berbahaya daripada vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:22:39.886415+00:00,semantic_scholar,rokok lebih berbahaya daripada vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:22:42.157111+00:00,semantic_scholar,rokok lebih berbahaya daripada vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:22:43.058987+00:00,semantic_scholar,rokok lebih berbahaya daripada vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:22:44.000226+00:00,semantic_scholar,rokok lebih berbahaya daripada vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:22:44.957675+00:00,semantic_scholar,rokok lebih berbahaya daripada vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:22:45.531792+00:00,semantic_scholar,rokok lebih berbahaya daripada vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:22:46.439169+00:00,semantic_scholar,rokok lebih berbahaya daripada vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:22:47.359835+00:00,semantic_scholar,rokok lebih berbahaya daripada vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:22:47.908209+00:00,semantic_scholar,rokok lebih berbahaya daripada vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:22:50.521769+00:00,semantic_scholar,rokok lebih berbahaya daripada vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:22:51.455392+00:00,semantic_scholar,rokok lebih berbahaya daripada vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:22:52.015532+00:00,semantic_scholar,rokok lebih berbahaya daripada vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:22:52.571888+00:00,semantic_scholar,rokok lebih berbahaya daripada vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:22:53.493983+00:00,semantic_scholar,rokok lebih berbahaya daripada vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:22:54.419939+00:00,semantic_scholar,rokok lebih berbahaya daripada vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:22:55.363511+00:00,semantic_scholar,rokok lebih berbahaya daripada vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:22:56.278883+00:00,semantic_scholar,rokok lebih berbahaya daripada vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:22:56.844044+00:00,semantic_scholar,rokok lebih berbahaya daripada vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:22:59.465306+00:00,semantic_scholar,rokok lebih berbahaya daripada vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:23:00.370515+00:00,semantic_scholar,rokok lebih berbahaya daripada vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:23:00.919521+00:00,semantic_scholar,rokok lebih berbahaya daripada vape,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:23:01.122445+00:00,semantic_scholar,rokok lebih berbahaya daripada vape,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\semantic_scholar_rokok_lebih_berbahaya_daripada_vape_1760120581.json,success,"search_returned:28, details_returned:0"
+2025-10-10T18:27:10.123971+00:00,pubmed,kebanyakan minum kopi menyebabkan asam lambung,,no results,No articles found for the given query.
+2025-10-10T18:27:12.191332+00:00,crossref,kebanyakan minum kopi menyebabkan asam lambung,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_kebanyakan_minum_kopi_menyebabkan_asam_lambung_1760120832.json,success,30 articles retrieved.
+2025-10-10T18:27:16.082338+00:00,semantic_scholar,kebanyakan minum kopi menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:27:17.002440+00:00,semantic_scholar,kebanyakan minum kopi menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:27:17.924415+00:00,semantic_scholar,kebanyakan minum kopi menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:27:18.827960+00:00,semantic_scholar,kebanyakan minum kopi menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:27:19.732388+00:00,semantic_scholar,kebanyakan minum kopi menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:27:20.301305+00:00,semantic_scholar,kebanyakan minum kopi menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:27:22.931710+00:00,semantic_scholar,kebanyakan minum kopi menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:27:23.836980+00:00,semantic_scholar,kebanyakan minum kopi menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:27:24.748543+00:00,semantic_scholar,kebanyakan minum kopi menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:27:25.293671+00:00,semantic_scholar,kebanyakan minum kopi menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:27:25.892010+00:00,semantic_scholar,kebanyakan minum kopi menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:27:26.440227+00:00,semantic_scholar,kebanyakan minum kopi menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:27:27.387523+00:00,semantic_scholar,kebanyakan minum kopi menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:27:27.958328+00:00,semantic_scholar,kebanyakan minum kopi menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:27:29.853066+00:00,semantic_scholar,kebanyakan minum kopi menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:27:30.813783+00:00,semantic_scholar,kebanyakan minum kopi menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:27:31.800252+00:00,semantic_scholar,kebanyakan minum kopi menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:27:32.725935+00:00,semantic_scholar,kebanyakan minum kopi menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:27:35.384046+00:00,semantic_scholar,kebanyakan minum kopi menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:27:36.329919+00:00,semantic_scholar,kebanyakan minum kopi menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:27:37.221379+00:00,semantic_scholar,kebanyakan minum kopi menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:27:38.135472+00:00,semantic_scholar,kebanyakan minum kopi menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:27:39.056183+00:00,semantic_scholar,kebanyakan minum kopi menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:27:40.030289+00:00,semantic_scholar,kebanyakan minum kopi menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:27:40.985336+00:00,semantic_scholar,kebanyakan minum kopi menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:27:43.627003+00:00,semantic_scholar,kebanyakan minum kopi menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:27:44.541701+00:00,semantic_scholar,kebanyakan minum kopi menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:27:45.110386+00:00,semantic_scholar,kebanyakan minum kopi menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:27:46.019548+00:00,semantic_scholar,kebanyakan minum kopi menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:27:46.596920+00:00,semantic_scholar,kebanyakan minum kopi menyebabkan asam lambung,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:27:46.800407+00:00,semantic_scholar,kebanyakan minum kopi menyebabkan asam lambung,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\semantic_scholar_kebanyakan_minum_kopi_menyebabkan_asam_lambung_1760120866.json,success,"search_returned:30, details_returned:0"
+2025-10-10T18:43:38.387961+00:00,pubmed,minum susu setiap hari membuat tubuh sehat,,no results,No articles found for the given query.
+2025-10-10T18:43:40.978579+00:00,crossref,minum susu setiap hari membuat tubuh sehat,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_minum_susu_setiap_hari_membuat_tubuh_sehat_1760121820.json,success,30 articles retrieved.
+2025-10-10T18:43:47.425474+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:43:48.997080+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:43:50.252185+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:43:51.697361+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:43:53.293900+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:43:54.732884+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:43:56.145631+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:43:57.544202+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:43:58.445640+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:43:59.450388+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:44:00.776160+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:44:02.150059+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:44:04.194895+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:44:05.766316+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:44:07.283400+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:44:08.218797+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:44:09.557533+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:44:10.572976+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:44:11.798441+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:44:12.846244+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:44:13.880401+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:44:14.962793+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:44:16.062718+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:44:17.428612+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:44:18.751495+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:44:19.472315+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:44:20.732543+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:44:22.077128+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:44:23.197979+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:44:24.345482+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:44:24.547271+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\semantic_scholar_minum_susu_setiap_hari_membuat_tubuh_sehat_1760121864.json,success,"search_returned:30, details_returned:0"
+2025-10-10T18:54:19.770935+00:00,pubmed,minum susu setiap hari membuat tubuh sehat,,no results,No articles found for the given query.
+2025-10-10T18:54:22.032435+00:00,crossref,minum susu setiap hari membuat tubuh sehat,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_minum_susu_setiap_hari_membuat_tubuh_sehat_1760122462.json,success,30 articles retrieved.
+2025-10-10T18:54:25.256989+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:54:26.200826+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:54:27.097211+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:54:28.035483+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:54:28.598293+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:54:29.157038+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:54:31.608578+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:54:33.088026+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:54:34.418342+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:54:35.725489+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:54:36.882927+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:54:38.829447+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:54:39.819346+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:54:41.261584+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:54:42.565502+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:54:43.386095+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:54:44.692141+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:54:45.858985+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:54:47.432457+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:54:48.341862+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:54:49.272397+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:54:49.881797+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:54:50.735077+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:54:52.008098+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:54:52.948365+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:54:53.773841+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:54:54.752309+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:54:55.965665+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:54:57.521295+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:54:58.452155+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:54:58.655458+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\semantic_scholar_minum_susu_setiap_hari_membuat_tubuh_sehat_1760122498.json,success,"search_returned:30, details_returned:0"

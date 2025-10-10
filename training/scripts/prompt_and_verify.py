@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-prompt_and_verify.py (refactor)
+prompt_and_verify.py (FINAL UPDATED)
 
-Versi yang diperbaiki:
-- Menambahkan seleksi top-k relevan dari hasil fetch (title+abstract embedding)
-- Menambahkan fallback cepat: ingest abstract/title sebagai chunk untuk retriever
-- Komentar jelas pada fungsi agar mudah dimengerti
-- Robust error handling saat memanggil LLM / DB / pipeline
+Perubahan utama:
+- Robust bilingual retrieval + translation fallback
+- Output JSON konsisten untuk frontend (dicetak ke stdout)
+- Hanya dua label akhir: VALID atau HOAX
+- Kesimpulan / synthesis otomatis dari bukti
+- Robust handling: None responses dari LLM, rate-limit handling
 """
 
 import os
@@ -14,6 +15,7 @@ import re
 import json
 import time
 import uuid
+import pathlib
 import argparse
 import sys
 import traceback
@@ -25,7 +27,7 @@ from google import genai
 from psycopg2.extras import RealDictCursor
 from pgvector.psycopg2 import register_vector
 
-# project modules (pastikan modul-modul ini ada di repo Anda)
+# project modules (ensure these exist in repo)
 import fetch_sources as fs
 import prepare_and_run_loader as pr
 import process_raw as praw
@@ -42,7 +44,6 @@ sys.path.insert(0, REPO_ROOT)
 
 load_dotenv(dotenv_path=os.path.join(REPO_ROOT, ".env"))
 
-# Initialize Gemini client (tries to reuse client from chunk_and_embed if exported there)
 try:
     client = getattr(cae, "client", None)
 except Exception:
@@ -54,70 +55,182 @@ if client is None:
         raise RuntimeError("GEMINI_API_KEY tidak ditemukan di environment variables atau .env file.")
     client = genai.Client(api_key=GEMINI_API_KEY)
 
-# Quick DB sanity check (optional; will error early if DB not reachable)
+# Quick DB sanity check
 try:
     conn = connect_db()
     with conn.cursor() as cur:
         cur.execute(f"SELECT count(*) FROM {DB_TABLE};")
         cnt = cur.fetchone()
-        print("[DB] rows in embeddings table:", cnt)
+        print(f"[DB] rows in embeddings table: {cnt}")
     conn.close()
 except Exception as e:
-    print("[DB] Warning: tidak dapat melakukan pengecekan awal ke DB:", str(e))
+    print(f"[DB] Warning: tidak dapat melakukan pengecekan awal ke DB: {str(e)}")
 
-# --- Prompt header ---
-PROMPT_HEADER = """
-Anda adalah sistem verifikasi fakta medis berdasarkan literatur ilmiah. Analisis klaim berikut dengan cermat menggunakan bukti-bukti dari jurnal dan dokumen ilmiah yang tersedia.
+# -------------------------
+# Utilities: extraction & safe text handling
+# -------------------------
+def _extract_text_from_model_resp(resp) -> str:
+    try:
+        if resp is None:
+            return ""
+        # genai response object variants
+        if hasattr(resp, "text"):
+            return resp.text or ""
+        if hasattr(resp, "candidates") and resp.candidates:
+            cand = resp.candidates[0]
+            if hasattr(cand, "content"):
+                content = cand.content
+                if hasattr(content, "parts") and content.parts:
+                    # content.parts may be list of objects with .text
+                    part = content.parts[0]
+                    return getattr(part, "text", "") or ""
+                elif hasattr(content, "text"):
+                    return content.text or ""
+            # fallback candidate properties
+            return getattr(cand, "text", "") or ""
+        if isinstance(resp, dict):
+            # dict form (older clients / debug)
+            if "candidates" in resp and resp["candidates"]:
+                cand = resp["candidates"][0]
+                content = cand.get("content", {})
+                if isinstance(content, dict) and "parts" in content and content["parts"]:
+                    return content["parts"][0].get("text", "") or ""
+                if isinstance(cand, dict) and "output" in cand:
+                    return cand["output"]
+            # last resort try 'text'
+            return str(resp.get("text", "")) if isinstance(resp, dict) else str(resp)
+        return str(resp)
+    except Exception:
+        try:
+            return str(resp)
+        except Exception:
+            return ""
 
-INSTRUKSI DETAIL:
-(terjemahan singkat -- lihat komentar kode untuk detail)
-...
-FORMAT OUTPUT (HANYA JSON VALID - TANPA KOMENTAR):
-{ ... }  # (sama seperti versi Anda sebelumnya)
-"""
+def safe_strip(s):
+    try:
+        if s is None:
+            return ""
+        return str(s).strip()
+    except Exception:
+        return ""
 
-# ---------------------------
-# Utility functions
-# ---------------------------
-
-def _safe_cos_sim(a: List[float], b: List[float]) -> float:
-    """Compute cosine similarity between two vectors represented as lists.
-       Returns similarity in [-1,1]. Handles zero vectors safely.
+# -------------------------
+# Translation & query generation (robust)
+# -------------------------
+def translate_text_gemini(text: str, target_lang: str = "English") -> str:
     """
+    Terjemahkan text ke target_lang menggunakan Gemini.
+    Defensive: handle None / non-string responses.
+    """
+    if not text:
+        return ""
+    prompt = f"Translate the following text to {target_lang}. Keep it concise and preserve medical terminology when possible.\n\nText:\n\"\"\"\n{text}\n\"\"\"\n\nOutput only the translated text."
+    try:
+        resp = client.models.generate_content(
+            model="gemini-2.5-flash-lite",
+            contents=prompt,
+            config={"temperature": 0.0, "max_output_tokens": 256}
+        )
+        txt = _extract_text_from_model_resp(resp)
+        txt = safe_strip(txt)
+        txt = txt.replace("```", "")
+        return txt or text
+    except Exception as e:
+        # do not crash on translate failure
+        print(f"[TRANSLATE] failed: {e}")
+        return text
+
+def generate_bilingual_queries(claim: str, langs: List[str] = ["English"]) -> List[str]:
+    """
+    Hasilkan daftar variasi query:
+      - klaim asli
+      - terjemahan ke languages
+      - (opsional) variasi dari LLM (tolerant terhadap non-JSON)
+    """
+    out = []
+    claim_clean = safe_strip(claim)
+    if claim_clean:
+        out.append(claim_clean)
+
+    # Add translations
+    for L in langs:
+        try:
+            tr = translate_text_gemini(claim_clean, target_lang=L)
+            tr = safe_strip(tr)
+            if tr and tr not in out:
+                out.append(tr)
+        except Exception:
+            pass
+
+    # Ask LLM for variations (but tolerant)
+    english_example = out[1] if len(out) > 1 else claim_clean
+    syn_prompt = f"""You are a medical search query assistant.
+Given the topic below, produce 3-5 short, focused search query variations or keyword phrases researchers would use.
+Return a JSON array of strings.
+
+Topic (original): {claim_clean}
+Topic (english translation): {english_example}
+"""
+    try:
+        resp = client.models.generate_content(
+            model="gemini-2.5-flash-lite",
+            contents=syn_prompt,
+            config={"temperature":0.2, "max_output_tokens":300}
+        )
+        txt = _extract_text_from_model_resp(resp)
+        txt = safe_strip(txt)
+        arr = []
+        # Try parse JSON first
+        try:
+            if txt:
+                arr = json.loads(txt)
+        except Exception:
+            # tolerant fallback: split lines and strip bullets
+            for line in (txt or "").splitlines():
+                line = line.strip().lstrip("-• ").strip()
+                if line:
+                    arr.append(line)
+        for q in arr:
+            qstr = safe_strip(q)
+            if qstr and qstr not in out:
+                out.append(qstr)
+    except Exception as e:
+        print(f"[GEN_QUERIES] failed: {e}")
+
+    # dedupe & limit
+    unique = []
+    for q in out:
+        qn = safe_strip(q)
+        if qn and qn not in unique:
+            unique.append(qn)
+    return unique[:6]
+
+# -------------------------
+# Retrieval helpers (unchanged core, defensive)
+# -------------------------
+def _safe_cos_sim(a: List[float], b: List[float]) -> float:
     try:
         import math
-        dot = 0.0
-        na = 0.0
-        nb = 0.0
-        for x, y in zip(a, b):
-            dot += float(x) * float(y)
-            na += float(x) * float(x)
-            nb += float(y) * float(y)
+        dot = sum(x * y for x, y in zip(a, b))
+        na = math.sqrt(sum(x * x for x in a))
+        nb = math.sqrt(sum(y * y for y in b))
         if na <= 0 or nb <= 0:
             return 0.0
-        return dot / (math.sqrt(na) * math.sqrt(nb))
+        return dot / (na * nb)
     except Exception:
         return 0.0
 
 def distance_to_similarity(dist: Optional[float]) -> float:
-    """Convert vector distance (Postgres <-> operator) to a similarity-like score in (0,1]."""
     if dist is None:
         return 0.0
     try:
-        val = float(dist)
-        return 1.0 / (1.0 + val)
+        return 1.0 / (1.0 + float(dist))
     except Exception:
         return 0.0
 
-# ---------------------------
-# DB retrieval
-# ---------------------------
-
-def retrieve_neighbors_from_db(query_embedding: List[float], k: int = 5, max_chars_each: int = 1200, debug_print: bool = False) -> List[Dict[str, Any]]:
-    """
-    Ambil k nearest neighbors dari tabel DB dengan metadata lengkap (doi, safe_id, teks).
-    Mengembalikan list dict: doc_id, safe_id, source_file, chunk_index, n_words, text, doi, distance
-    """
+def retrieve_neighbors_from_db(query_embedding: List[float], k: int = 5, 
+                              max_chars_each: int = 1200, 
+                              debug_print: bool = False) -> List[Dict[str, Any]]:
     conn = connect_db()
     try:
         try:
@@ -143,26 +256,18 @@ def retrieve_neighbors_from_db(query_embedding: List[float], k: int = 5, max_cha
     finally:
         conn.close()
 
-    if debug_print:
-        if not rows:
-            print("[DEBUG] Query returned 0 rows.")
-        else:
-            r0 = rows[0]
-            print("[DEBUG] rows[0] dengan DOI:", r0.get('doi', 'No DOI'))
+    if debug_print and rows:
+        print(f"[DEBUG] Retrieved {len(rows)} rows, first DOI: {rows[0].get('doi', 'No DOI')}")
 
     out = []
     for r in rows:
-        txt = (r.get("text") or "").replace("\n", " ").strip()[:max_chars_each]
-        raw_dist = r.get("distance")
-        # distance sometimes returned in DB-specific form: normalize to float if possible
+        txt = safe_strip((r.get("text") or "").replace("\n", " "))[:max_chars_each]
         dist_val = None
         try:
+            raw_dist = r.get("distance")
             dist_val = float(raw_dist) if raw_dist is not None else None
         except Exception:
-            try:
-                dist_val = float(raw_dist[0]) if isinstance(raw_dist, (list, tuple)) and len(raw_dist) > 0 else None
-            except Exception:
-                dist_val = None
+            pass
 
         out.append({
             "doc_id": r.get("doc_id"),
@@ -176,27 +281,378 @@ def retrieve_neighbors_from_db(query_embedding: List[float], k: int = 5, max_cha
         })
     return out
 
-# ---------------------------
-# Prompt builder & LLM call
-# ---------------------------
+def compute_relevance_score(claim: str, neighbor_text: str, neighbor_title: str = "") -> float:
+    claim_lower = safe_strip(claim).lower()
+    text_lower = safe_strip(neighbor_text).lower()
+    title_lower = safe_strip(neighbor_title).lower()
 
-def build_prompt(claim: str, neighbors: List[Dict[str, Any]], max_context_chars: int = 2500) -> str:
-    """
-    Membangun prompt RAG: sertakan metadata (safe_id, DOI jika ada, file) dan potongan teks.
-    Batasi panjang konteks agar LLM tidak kelebihan token.
-    """
+    patterns = [
+        r'asam lambung|gastric acid|stomach acid',
+        r'perut kosong|empty stomach|fasting|hungry',
+        r'diabetes|diabetic',
+        r'hipertensi|hypertension|blood pressure',
+        r'kolesterol|cholesterol',
+        r'jantung|heart|cardiac',
+        r'kanker|cancer|tumor',
+        r'obesitas|obesity|overweight'
+    ]
+
+    keyword_score = 0.0
+    for pattern in patterns:
+        if re.search(pattern, claim_lower):
+            if re.search(pattern, text_lower) or re.search(pattern, title_lower):
+                keyword_score += 1.0
+
+    keyword_score = min(keyword_score / len(patterns), 1.0)
+    return keyword_score
+
+def filter_by_relevance(claim: str, neighbors: List[Dict[str, Any]], 
+                       min_relevance: float = 0.3, debug: bool = False) -> List[Dict[str, Any]]:
+    filtered = []
+    for nb in neighbors:
+        text = nb.get("text", "")
+        title = nb.get("title", "") or nb.get("safe_id", "")
+
+        rel_score = compute_relevance_score(claim, text, title)
+        dist = nb.get("distance", 1.0)
+        dist_score = 1.0 / (1.0 + float(dist)) if dist is not None else 0.5
+        combined_score = 0.6 * dist_score + 0.4 * rel_score
+        nb["relevance_score"] = combined_score
+
+        if combined_score >= min_relevance:
+            filtered.append(nb)
+            if debug:
+                print(f"[RELEVANCE] Kept doc {nb.get('safe_id')} (score: {combined_score:.3f})")
+        else:
+            if debug:
+                print(f"[RELEVANCE] Filtered out doc {nb.get('safe_id')} (score: {combined_score:.3f})")
+
+    filtered.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
+    return filtered
+
+# -------------------------
+# Bilingual retrieval (ID -> EN variations)
+# -------------------------
+def retrieve_with_expansion_bilingual(claim: str, k: int = 5, 
+                                     expand_queries: bool = True, debug: bool = False) -> List[Dict[str, Any]]:
+    if expand_queries:
+        queries = generate_bilingual_queries(claim, langs=["English"])
+    else:
+        queries = [claim]
+
+    if debug:
+        print(f"[BILINGUAL_QUERIES] Using queries: {queries}")
+
+    all_neighbors = []
+    seen_ids = set()
+    for query in queries:
+        try:
+            emb = embed_texts_gemini([query])[0]
+        except Exception as e:
+            print(f"[RETRIEVE_BIL] embed failed for query '{query}': {e}")
+            continue
+
+        neighbors = retrieve_neighbors_from_db(emb, k=k, debug_print=debug)
+        for nb in neighbors:
+            nb_id = f"{nb.get('doc_id')}_{nb.get('chunk_index')}"
+            if nb_id not in seen_ids:
+                seen_ids.add(nb_id)
+                nb["_matched_query"] = query
+                all_neighbors.append(nb)
+
+    filtered = filter_by_relevance(claim, all_neighbors, min_relevance=0.25, debug=debug)
+    filtered.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
+    return filtered[:k*3]
+
+# -------------------------
+# Dynamic fetch helpers & ingest (unchanged logic but defensive)
+# -------------------------
+def _load_fetched_file_to_items(path_or_obj):
+    items = []
+    if isinstance(path_or_obj, dict):
+        title = path_or_obj.get("title") or path_or_obj.get("paperTitle") or ""
+        abstract = path_or_obj.get("abstract") or path_or_obj.get("summary") or ""
+        url = path_or_obj.get("url") or path_or_obj.get("pdf_url") or ""
+        doi = path_or_obj.get("doi") or path_or_obj.get("paperId") or ""
+        items.append({"title": title, "abstract": abstract, "url": url, "doi": doi})
+        return items
+
+    if isinstance(path_or_obj, (list, tuple)):
+        for it in path_or_obj:
+            items.extend(_load_fetched_file_to_items(it))
+        return items
+
+    if isinstance(path_or_obj, str):
+        p = pathlib.Path(path_or_obj)
+        if not p.exists():
+            try:
+                obj = json.loads(path_or_obj)
+                return _load_fetched_file_to_items(obj)
+            except Exception:
+                return []
+        name = p.name.lower()
+        try:
+            if name.startswith("crossref") and p.suffix == ".json":
+                parsed = praw.parse_crossref_file(p)
+                for d in parsed:
+                    items.append({"title": d.get("title",""), "abstract": d.get("abstract",""), "url": d.get("url","") if d.get("url") else "", "doi": d.get("doi","")})
+                return items
+            elif "semantic" in name and p.suffix == ".json":
+                parsed = praw.parse_sematic_scholar_file(p)
+                for d in parsed:
+                    items.append({"title": d.get("title",""), "abstract": d.get("abstract",""), "url": d.get("url","") if d.get("url") else "", "doi": d.get("doi","")})
+                return items
+            elif "pubmed" in name and p.suffix in [".xml", ".txt"]:
+                parsed = praw.parse_pubmed_xml_file(p)
+                for d in parsed:
+                    items.append({"title": d.get("title",""), "abstract": d.get("abstract",""), "url": d.get("url","") if d.get("url") else "", "doi": d.get("doi","")})
+                return items
+            else:
+                try:
+                    obj = json.loads(p.read_text(encoding="utf-8"))
+                    return _load_fetched_file_to_items(obj)
+                except Exception:
+                    return items
+        except Exception as e:
+            print(f"[_load_fetched_file_to_items] parse error for {p}: {e}")
+        return items
+
+    return items
+
+def ingest_abstracts_as_chunks(selected_items: List[Dict[str, Any]]):
+    if not selected_items:
+        return False
+
+    os.makedirs("data/chunks", exist_ok=True)
+    texts = []
+    metas = []
+
+    for it in selected_items:
+        text = (it.get("title","") + "\n\n" + it.get("abstract","")).strip()
+        if not text:
+            continue
+        texts.append(text)
+        metas.append({
+            "safe_id": it.get("doi") or it.get("url") or str(uuid.uuid4()),
+            "doi": it.get("doi",""),
+            # save original fetch URL (if any) so frontend can link back
+            "source": it.get("url","") or it.get("source","") or "",
+        })
+
+    if not texts:
+        return False
+
+    try:
+        vecs = embed_texts_gemini(texts)
+    except Exception as e:
+        print(f"[FAST_INGEST] Error embedding abstracts: {e}")
+        return False
+
+    out_fname = f"abstract_chunks_{int(time.time())}.jsonl"
+    out_path = os.path.join("data", "chunks", out_fname)
+
+    with open(out_path, "w", encoding="utf-8") as fo:
+        for text, meta, vec in zip(texts, metas, vecs):
+            rec = {
+                "doc_id": meta["safe_id"],
+                "safe_id": meta["safe_id"],
+                "source_file": "dynamic_fetch",
+                "chunk_index": 0,
+                "n_words": len(text.split()),
+                "text": text,
+                "doi": meta["doi"],
+                # store original URL in a dedicated field
+                "source_url": meta.get("source",""),
+                "embedding": list(vec) if hasattr(vec, "__iter__") else vec
+            }
+            fo.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+    print(f"[FAST_INGEST] Wrote {len(texts)} abstract chunks to {out_path}")
+
+    try:
+        ic.ingest()
+        time.sleep(1.0)
+        return True
+    except Exception as e:
+        print(f"[FAST_INGEST] ingest() failed: {e}")
+        return False
+
+
+def dynamic_fetch_and_update(claim: str, max_fetch_results: int = 10, 
+                            top_k_select: int = 8):
+    print(f"[DYNAMIC_FETCH] Fetching for: {claim[:80]}...")
+    fetched_paths = []
+
+    try:
+        res_pub = fs.fetch_pubmed(claim, maximum_results=max_fetch_results)
+        if res_pub:
+            fetched_paths.append(res_pub)
+        time.sleep(0.3)
+    except Exception as e:
+        print(f"[DYNAMIC_FETCH] fetch_pubmed failed: {e}")
+
+    try:
+        res_x = fs.fetch_crossref(claim, rows=max_fetch_results)
+        if res_x:
+            fetched_paths.append(res_x)
+        time.sleep(0.3)
+    except Exception as e:
+        print(f"[DYNAMIC_FETCH] fetch_crossref failed: {e}")
+
+    try:
+        res_s2 = fs.fetch_semantic_scholar(claim, limit=max_fetch_results)
+        if res_s2:
+            fetched_paths.append(res_s2)
+    except Exception as e:
+        print(f"[DYNAMIC_FETCH] fetch_semantic_scholar failed: {e}")
+
+    all_items = []
+    for fp in fetched_paths:
+        try:
+            items = _load_fetched_file_to_items(fp)
+            if items:
+                all_items.extend(items)
+        except Exception as e:
+            print(f"[DYNAMIC_FETCH] Error loading fetched file {fp}: {e}")
+
+    if not all_items:
+        print("[DYNAMIC_FETCH] No items available after parsing fetched files.")
+        return False, []
+
+    cand_texts = []
+    cand_meta = []
+    for it in all_items:
+        t = (it.get("title","") + "\n\n" + (it.get("abstract","") or "")).strip()
+        if t:
+            cand_texts.append(t)
+            cand_meta.append(it)
+
+    if not cand_texts:
+        print("[DYNAMIC_FETCH] No candidate texts to embed.")
+        return False, []
+
+    try:
+        claim_vec = embed_texts_gemini([claim])[0]
+        cand_vecs = embed_texts_gemini(cand_texts)
+    except Exception as e:
+        print(f"[DYNAMIC_FETCH] Embedding failed: {e}")
+        return False, []
+
+    sims = [_safe_cos_sim(claim_vec, v) for v in cand_vecs]
+    idx_sorted = sorted(range(len(sims)), key=lambda i: sims[i], reverse=True)[:top_k_select]
+    selected = [cand_meta[i] for i in idx_sorted]
+
+    print(f"[DYNAMIC_FETCH] Selected {len(selected)} items (top sims: {[round(sims[i],3) for i in idx_sorted[:5]]})")
+
+    norm_selected = []
+    for s in selected:
+        norm_selected.append({
+            "title": s.get("title",""),
+            "abstract": s.get("abstract",""),
+            "url": s.get("url",""),
+            "doi": s.get("doi","")
+        })
+
+    did_ingest = ingest_abstracts_as_chunks(norm_selected)
+    return did_ingest, norm_selected
+
+# -------------------------
+# Decide whether dynamic fetch needed
+# -------------------------
+def needs_dynamic_fetch(neighbors: List[Dict[str, Any]],
+                        claim: str,
+                        min_relevance_mean: float = 0.30,
+                        min_retriever_mean: float = 0.30,
+                        min_max_relevance: float = 0.45,
+                        debug: bool = False) -> bool:
+    if not neighbors:
+        if debug:
+            print("[QUALITY_CHECK] No neighbors -> need dynamic fetch.")
+        return True
+
+    rels = [n.get("relevance_score", 0.0) for n in neighbors if n.get("relevance_score") is not None]
+    sims = [distance_to_similarity(n.get("distance")) for n in neighbors if n.get("distance") is not None]
+
+    relevance_mean = float(sum(rels) / len(rels)) if rels else 0.0
+    retriever_mean = float(sum(sims) / len(sims)) if sims else 0.0
+    max_rel = max(rels) if rels else 0.0
+
+    claim_tokens = set(re.findall(r"[A-Za-zÀ-ÿ0-9]+", safe_strip(claim).lower()))
+    def has_keyword_match(text: str) -> bool:
+        txt_tokens = set(re.findall(r"[A-Za-zÀ-ÿ0-9]+", safe_strip(text).lower()))
+        overlap = [t for t in (claim_tokens & txt_tokens) if len(t) > 2]
+        return len(overlap) > 0
+
+    any_keyword = any(has_keyword_match(n.get("text","")) or has_keyword_match(n.get("safe_id","") or "") for n in neighbors)
+
+    if debug:
+        print(f"[QUALITY_CHECK] relevance_mean={relevance_mean:.3f}, retriever_mean={retriever_mean:.3f}, max_rel={max_rel:.3f}, any_keyword={any_keyword}")
+
+    if relevance_mean < min_relevance_mean or retriever_mean < min_retriever_mean:
+        if debug:
+            print("[QUALITY_CHECK] mean scores below threshold -> dynamic fetch recommended")
+        return True
+
+    if max_rel < min_max_relevance:
+        if debug:
+            print("[QUALITY_CHECK] max relevance below threshold -> dynamic fetch recommended")
+        return True
+
+    if not any_keyword:
+        if debug:
+            print("[QUALITY_CHECK] no keyword overlap between claim and neighbors -> dynamic fetch recommended")
+        return True
+
+    return False
+
+# -------------------------
+# Translate snippets to Indonesian if needed (heuristic)
+# -------------------------
+def translate_snippets_if_needed(neighbors: List[Dict[str,Any]], target_lang="Indonesian") -> List[Dict[str,Any]]:
+    for nb in neighbors:
+        txt = nb.get("text","")
+        if not txt:
+            nb["_text_translated"] = ""
+            continue
+        eng_words = len(re.findall(r"[a-zA-Z]{4,}", txt))
+        id_connectives = len(re.findall(r"\b(dan|yang|dengan|atau|untuk|di)\b", txt.lower()))
+        if eng_words > max(5, id_connectives * 3):
+            try:
+                nb["_text_translated"] = translate_text_gemini(txt, target_lang=target_lang)
+            except Exception as e:
+                print(f"[TRANSLATE] failed for snippet: {e}")
+                nb["_text_translated"] = txt
+        else:
+            nb["_text_translated"] = txt
+    return neighbors
+
+# -------------------------
+# Prompt building (user-facing in Indonesian)
+# -------------------------
+PROMPT_HEADER = """
+Anda adalah sistem verifikasi fakta medis yang teliti. Tugas Anda:
+1) Evaluasi relevansi bukti terhadap klaim.
+2) Jika ada bukti yang mendukung atau menolak klaim, jelaskan dasar keputusan.
+3) Output harus JSON dengan fields: claim, analysis, label (VALID/HOAX), confidence (0-1), evidence (list), summary.
+"""
+
+def build_prompt(claim: str, neighbors: List[Dict[str, Any]], 
+                max_context_chars: int = 3000) -> str:
     parts = []
     total = 0
-    for nb in neighbors:
+    for idx, nb in enumerate(neighbors, 1):
         doi = nb.get('doi', '') or ''
         safe_id = nb.get('safe_id', '') or nb.get('doc_id', '')
         source_file = nb.get('source_file', '')
-        source_info = f"ID: {safe_id}"
+        rel_score = nb.get('relevance_score', 0.0)
+        text_for_prompt = nb.get("_text_translated") or nb.get("text","")
+        source_info = f"[Bukti #{idx}] ID: {safe_id}"
         if doi:
             source_info += f" | DOI: {doi}"
         if source_file:
             source_info += f" | File: {source_file}"
-        part = f"---\nSumber: {source_info}\nTeks: {nb.get('text', '')}\n"
+        source_info += f" | Relevance: {rel_score:.3f}"
+        part = f"{source_info}\n{text_for_prompt}\n---\n"
         if total + len(part) > max_context_chars:
             break
         parts.append(part)
@@ -205,48 +661,26 @@ def build_prompt(claim: str, neighbors: List[Dict[str, Any]], max_context_chars:
     context_block = "\n".join(parts)
     prompt = f"""{PROMPT_HEADER}
 
-KLAIM YANG AKAN DIVERIFIKASI:
+CLAIM:
 "{claim.strip()}"
 
-BUKTI DARI LITERATUR ILMIAH:
+BUKTI:
 {context_block}
 
-ANALISIS DAN RESPOND DALAM FORMAT JSON:"""
+Instruksi:
+- Evaluasi bukti dan tentukan apakah klaim tersebut didukung (VALID) atau dibantah (HOAX).
+- Jelaskan analisis singkat dan sertakan evidence list (id, snippet).
+- Kembalikan hanya JSON yang valid dengan fields: claim, analysis, label, confidence, evidence (array of objects with safe_id & snippet), summary.
+"""
     return prompt
 
-def _extract_text_from_model_resp(resp) -> str:
-    """Ekstrak teks dari response Gemini SDK (beberapa bentuk)"""
-    try:
-        if resp is None:
-            return ""
-        if hasattr(resp, "text"):
-            return resp.text
-        if hasattr(resp, "candidates") and resp.candidates:
-            cand = resp.candidates[0]
-            if hasattr(cand, "content"):
-                content = cand.content
-                if hasattr(content, "parts") and content.parts:
-                    return content.parts[0].text
-                elif hasattr(content, "text"):
-                    return content.text
-        if isinstance(resp, dict):
-            if "candidates" in resp and resp["candidates"]:
-                cand = resp["candidates"][0]
-                if "content" in cand:
-                    content = cand["content"]
-                    if "parts" in content and content["parts"]:
-                        return content["parts"][0].get("text", "")
-        return str(resp)
-    except Exception as e:
-        print("[DEBUG] Error extracting text from model response:", e)
-        return str(resp)
-
-def call_gemini(prompt: str, model: str = "gemini-2.5-flash", temperature: float = 0.0, max_output_tokens: int = 1200) -> str:
-    """
-    Panggil Gemini dan pastikan output berupa JSON valid.
-    Mencoba beberapa model fallback jika output tidak valid/JSON parsing gagal.
-    """
-    models_to_try = [model, "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-2.0-flash-lite"]
+# -------------------------
+# LLM call with fallback
+# -------------------------
+def call_gemini(prompt: str, model: str = "gemini-2.5-flash-lite", 
+               temperature: float = 0.0, max_output_tokens: int = 1200) -> str:
+    # try list of models but prefer lite first to reduce quota pressure
+    models_to_try = [model, "gemini-2.5-flash", "gemini-2.0-flash"]
     for m in models_to_try:
         try:
             resp = client.models.generate_content(
@@ -260,73 +694,65 @@ def call_gemini(prompt: str, model: str = "gemini-2.5-flash", temperature: float
                 }
             )
             text = _extract_text_from_model_resp(resp)
-            if not text or not text.strip():
+            text = safe_strip(text)
+            if not text:
                 continue
-            # try parse JSON quick check
-            t = text.strip()
-            try:
-                json.loads(t)
-                return t
-            except json.JSONDecodeError:
-                # try strip markdown fences and retry
-                t2 = t.replace("```json", "").replace("```", "").strip()
-                try:
-                    json.loads(t2)
-                    return t2
-                except Exception:
-                    print(f"[DEBUG] model {m} returned non-JSON output (len {len(t)}). Trying next model.")
-                    continue
+            # try to return JSON-like text (strip fences)
+            t = text.replace("```json", "").replace("```", "").strip()
+            return t
         except Exception as e:
-            print(f"[DEBUG] call_gemini with model {m} failed:", str(e))
+            print(f"[DEBUG] call_gemini with model {m} failed: {str(e)}")
             continue
-    raise RuntimeError("Semua model Gemini gagal menghasilkan JSON valid.")
-
-# ---------------------------
-# JSON parsing helpers
-# ---------------------------
+    raise RuntimeError("All Gemini model calls failed or returned empty.")
 
 def fix_common_json_issues(json_str: str) -> str:
-    """Perbaiki beberapa masalah JSON umum (trailing commas dsb)."""
     s = json_str
-    s = re.sub(r',(\s*[}\]])', r'\1', s)  # trailing commas
-    # remove control chars
+    s = re.sub(r',(\s*[}\]])', r'\1', s)
     s = ''.join(ch for ch in s if ord(ch) >= 32 or ch in '\n\r\t')
     return s
 
 def validate_and_normalize_result(result: dict) -> dict:
-    """Normalisasi struktur JSON keluaran LLM agar konsisten."""
+    # normalize keys and map ANY unknown->HOAX (no TIDAK TERDETEKSI)
+    result = result or {}
     if "label" not in result:
-        result["label"] = "TIDAK TERDETEKSI"
-    label = result["label"].upper().strip()
-    if label not in ["VALID", "HOAX", "TIDAK TERDETEKSI"]:
-        mapping = {"TIDAK PASTI": "TIDAK TERDETEKSI", "UNCERTAIN": "TIDAK TERDETEKSI",
-                   "TRUE": "VALID", "BENAR": "VALID", "FALSE": "HOAX", "SALAH": "HOAX"}
-        result["label"] = mapping.get(label, "TIDAK TERDETEKSI")
+        result["label"] = "HOAX"
+    label = safe_strip(result.get("label", "")).upper()
+    if label not in ["VALID", "HOAX"]:
+        # map plausible synonyms
+        mapping = {
+            "TRUE": "VALID",
+            "BENAR": "VALID",
+            "FALSE": "HOAX",
+            "SALAH": "HOAX",
+            "UNCERTAIN": "HOAX",
+            "TIDAK TERDETEKSI": "HOAX",
+            "TIDAK PASTI": "HOAX"
+        }
+        result["label"] = mapping.get(label, "HOAX")
     result.setdefault("confidence", 0.0)
-    result.setdefault("summary", "")
+    # clip/normalize confidence between 0..1
+    try:
+        cf = float(result.get("confidence", 0.0))
+        cf = max(0.0, min(1.0, cf))
+    except Exception:
+        cf = 0.0
+    result["confidence"] = cf
+    result.setdefault("analysis", "")
     result.setdefault("evidence", [])
+    result.setdefault("summary", "")
     result.setdefault("references", [])
-    result.setdefault("methodology_notes", "")
-    result.setdefault("confidence_reasoning", "")
-    result["confidence"] = float(result.get("confidence", 0.0))
-    # ensure doi fields exist
-    for ev in result["evidence"]:
-        if isinstance(ev, dict) and "doi" not in ev:
-            ev["doi"] = ""
-    for ref in result["references"]:
-        if isinstance(ref, dict) and "doi" not in ref:
-            ref["doi"] = ""
     return result
 
 def extract_json_from_text(text: str) -> Dict[str, Any]:
-    """Robust JSON extraction from text produced by LLM."""
-    s = text.strip()
-    s = s.replace("```json", "").replace("```", "").strip()
+    s = safe_strip(text)
+    if not s:
+        return validate_and_normalize_result({})
+    # attempt plain json parse
     try:
-        result = json.loads(s)
-        return validate_and_normalize_result(result)
-    except json.JSONDecodeError as e1:
-        # attempt to extract the first {...} balanced block
+        parsed = json.loads(s)
+        return validate_and_normalize_result(parsed)
+    except Exception:
+        # try to find first JSON-like object
         start = -1
         brace = 0
         for i, ch in enumerate(s):
@@ -339,402 +765,383 @@ def extract_json_from_text(text: str) -> Dict[str, Any]:
                 if brace == 0 and start != -1:
                     candidate = s[start:i+1]
                     try:
-                        result = json.loads(candidate)
-                        return validate_and_normalize_result(result)
+                        parsed = json.loads(candidate)
+                        return validate_and_normalize_result(parsed)
                     except Exception:
-                        # try fixes
                         candidate_fixed = fix_common_json_issues(candidate)
                         try:
-                            result = json.loads(candidate_fixed)
-                            return validate_and_normalize_result(result)
+                            parsed = json.loads(candidate_fixed)
+                            return validate_and_normalize_result(parsed)
                         except Exception:
-                            break
-        # all attempts failed -> return default
-        print("[WARNING] Tidak dapat parse JSON output LLM. Mengembalikan default response.")
-        return {
-            "label": "TIDAK TERDETEKSI",
-            "confidence": 0.0,
-            "summary": "Gagal memproses response dari LLM.",
-            "evidence": [],
-            "references": [],
-            "methodology_notes": "Error parsing LLM response",
-            "confidence_reasoning": "Parsing failure",
-            "notes": f"Raw response preview: {s[:400]}"
-        }
+                            pass
+        # fallback: return minimal HOAX response
+        print("[WARNING] Cannot parse JSON from LLM. Returning default HOAX response.")
+        return validate_and_normalize_result({})
 
-# ---------------------------
-# Dynamic fetch + selection + fast ingest
-# ---------------------------
+# -------------------------
+# Synthesis / final decision logic (only VALID/HOAX)
+# -------------------------
+def decide_final_label_and_summary(parsed: Dict[str,Any], neighbors: List[Dict[str,Any]], combined_confidence: float) -> Dict[str,Any]:
+    analysis_text = safe_strip(parsed.get("analysis") or parsed.get("summary") or "")
+    analysis_lower = analysis_text.lower()
 
-def _flatten_fetched_results(fetched_results: List[Any]) -> List[Dict[str, Any]]:
-    """
-    Flatten results from different fetch_* functions to a unified list of dicts containing:
-    { 'title', 'abstract', 'url', 'doi', 'source' }
-    Each fetch_* in your repo should ideally return list of dicts or dict; this helper tolerates a few shapes.
-    """
-    flat = []
-    for batch in fetched_results:
-        if not batch:
-            continue
-        # if it's a dict (single result), convert to list
-        if isinstance(batch, dict):
-            items = [batch]
-        else:
-            items = list(batch)
-        for it in items:
-            # try common keys
-            title = it.get("title") or it.get("paperTitle") or it.get("name") or ""
-            abstract = it.get("abstract") or it.get("summary") or it.get("description") or ""
-            url = it.get("url") or it.get("pdf_url") or it.get("pdf") or it.get("link") or ""
-            doi = it.get("doi") or it.get("paperId") or it.get("id") or ""
-            flat.append({
-                "title": str(title).strip(),
-                "abstract": str(abstract).strip(),
-                "url": str(url).strip(),
-                "doi": str(doi).strip(),
-                "raw": it
-            })
-    return flat
+    # cues (simple)
+    support_cues = ["mendukung", "support", "supports", "increases", "associated with", "lebih berisiko", "lebih berbahaya"]
+    contradict_cues = ["tidak", "no evidence", "not supported", "insufficient", "does not", "no association", "lack of evidence", "not associated"]
 
-def _write_selected_to_raw_selected(selected: List[Dict[str, Any]]):
-    """
-    Tulis selected items ke folder `data/raw_selected/` sebagai JSON agar prepare_and_run_loader
-    dapat memproses hanya dokumen ini.
-    """
-    os.makedirs("data/raw_selected", exist_ok=True)
-    for s in selected:
-        key = (s.get("doi") or s.get("url") or s.get("title") or str(uuid.uuid4()))[:120]
-        safe_name = re.sub(r"[^\w\-_.]", "_", key)[:80]
-        path = os.path.join("data", "raw_selected", safe_name + ".json")
-        with open(path, "w", encoding="utf-8") as fo:
-            json.dump(s, fo, ensure_ascii=False, indent=2)
+    supports = any(c in analysis_lower for c in support_cues)
+    contradicts = any(c in analysis_lower for c in contradict_cues)
 
-def ingest_abstracts_as_chunks(selected_items: List[Dict[str, Any]]):
-    """
-    FAST FALLBACK:
-    - Ambil title + abstract dari selected_items
-    - Embed teks tersebut (embed_texts_gemini)
-    - Buat file JSONL di data/chunks/ dengan field embedding sehingga ingest() bisa langsung memprosesnya
-    - Panggil ic.ingest() untuk memasukkan ke DB
-    Catatan: fungsi ini membuat chunk singkat (title+abstract) — berguna untuk respons cepat.
-    """
-    if not selected_items:
-        return False
-
-    os.makedirs("data/chunks", exist_ok=True)
-    records = []
-    texts = []
-    metas = []
-    for it in selected_items:
-        text = (it.get("title","") + "\n\n" + it.get("abstract","")).strip()
-        if not text:
-            continue
-        texts.append(text)
-        metas.append({"safe_id": it.get("doi") or it.get("url") or str(uuid.uuid4()),
-                      "doi": it.get("doi",""),
-                      "source": it.get("url","") or it.get("raw","")})
-    if not texts:
-        return False
-
-    # embed in batches using the project's embed function
-    try:
-        vecs = embed_texts_gemini(texts)
-    except Exception as e:
-        print("[FAST_INGEST] Error embedding abstracts:", e)
-        return False
-
-    # write a single jsonl file with all records
-    out_fname = f"abstract_chunks_{int(time.time())}.jsonl"
-    out_path = os.path.join("data", "chunks", out_fname)
-    with open(out_path, "w", encoding="utf-8") as fo:
-        for text, meta, vec in zip(texts, metas, vecs):
-            rec = {
-                "id": str(uuid.uuid4()),
-                "text": text,
-                "meta": meta,
-                "embedding": list(vec) if hasattr(vec, "__iter__") else vec
-            }
-            fo.write(json.dumps(rec, ensure_ascii=False) + "\n")
-    print(f"[FAST_INGEST] Wrote {len(texts)} abstract chunks to {out_path}")
-
-    # now call ingest() — it expects data/chunks/*.jsonl
-    try:
-        ic.ingest()
-    except Exception as e:
-        print("[FAST_INGEST] ingest() failed:", e)
-        return False
-
-    return True
-
-def dynamic_fetch_and_update(claim: str,
-                             max_fetch_results: int = 10,
-                             top_k_select: int = 8,
-                             embed_batch_size: int = 32,
-                             do_full_download: bool = False):
-    """
-    Dynamic fetch pipeline:
-    1) fetch from multiple sources (PubMed, CrossRef, Semantic Scholar)
-    2) flatten results and compute embeddings for title+abstract (fast)
-    3) select top_k most similar to the claim
-    4) if do_full_download=True -> write selected to data/raw_selected and call prepare_and_run_loader -> full chunk+embed -> ingest
-       else -> FAST fallback: embed title+abstract -> write to data/chunks -> ingest directly
-    Returns True jika ada update (chunks ingested), False otherwise.
-    """
-    print("[DYNAMIC_FETCH] Start dynamic fetch for claim:", claim[:120])
-    fetched = []
-    # Attempt fetch from each source but tolerate failures
-    try:
-        try:
-            res_pub = fs.fetch_pubmed(claim, maximum_results=max_fetch_results)
-            if res_pub:
-                fetched.append(res_pub)
-        except Exception as e:
-            print("[DYNAMIC_FETCH] fetch_pubmed failed:", e)
-        time.sleep(0.5)
-
-        try:
-            res_x = fs.fetch_crossref(claim, rows=max_fetch_results)
-            if res_x:
-                fetched.append(res_x)
-        except Exception as e:
-            print("[DYNAMIC_FETCH] fetch_crossref failed:", e)
-        time.sleep(0.5)
-
-        try:
-            res_s2 = fs.fetch_semantic_scholar(claim, limit=max_fetch_results)
-            if res_s2:
-                fetched.append(res_s2)
-        except Exception as e:
-            print("[DYNAMIC_FETCH] fetch_semantic_scholar failed:", e)
-    except Exception as e:
-        print("[DYNAMIC_FETCH] Unexpected error during fetch step:", e)
-
-    items = _flatten_fetched_results(fetched)
-    if not items:
-        print("[DYNAMIC_FETCH] No fetched items found.")
-        return False
-
-    # prepare texts for embedding: title + first 250-400 chars of abstract
-    cand_texts = []
-    cand_meta = []
-    for it in items:
-        t = (it.get("title","") + "\n\n" + (it.get("abstract","")[:1200] or "")).strip()
+    # simple evidence tally (keywords)
+    cnt_vape = 0
+    cnt_smoke = 0
+    for n in neighbors:
+        t = safe_strip(n.get("_text_translated") or n.get("text") or "").lower()
         if not t:
             continue
-        cand_texts.append(t)
-        cand_meta.append(it)
+        if re.search(r"\b(vape|e-cigarette|electronic cigarette|e-cig)\b", t):
+            if re.search(r"\b(risk|harm|disease|damage|adverse|mortality|injury|tox)\b", t):
+                cnt_vape += 1
+        if re.search(r"\b(smok|cigarette|tobacco|cigarettes|tobacco smoke)\b", t):
+            if re.search(r"\b(risk|harm|disease|damage|adverse|mortality|injury|tox)\b", t):
+                cnt_smoke += 1
 
-    if not cand_texts:
-        print("[DYNAMIC_FETCH] No candidate texts available for embedding.")
-        return False
-
-    # embed claim and candidates (batched)
-    try:
-        claim_vec = embed_texts_gemini([claim])[0]
-    except Exception as e:
-        print("[DYNAMIC_FETCH] Error embedding claim:", e)
-        return False
-
-    try:
-        cand_vecs = embed_texts_gemini(cand_texts)
-    except Exception as e:
-        print("[DYNAMIC_FETCH] Error embedding candidate texts:", e)
-        return False
-
-    # compute similarities and select top_k
-    sims = [_safe_cos_sim(claim_vec, v) for v in cand_vecs]
-    idx_sorted = sorted(range(len(sims)), key=lambda i: sims[i], reverse=True)[:top_k_select]
-    selected = [cand_meta[i] for i in idx_sorted]
-    selected_scores = [sims[i] for i in idx_sorted]
-    print(f"[DYNAMIC_FETCH] Selected top {len(selected)} items (example scores): {selected_scores[:5]}")
-
-    # Option A: full pipeline for selected documents (download PDFs, chunk+embed, ingest)
-    if do_full_download:
-        print("[DYNAMIC_FETCH] Running full pipeline (download PDFs -> chunk+embed -> ingest) for selected items.")
-        _write_selected_to_raw_selected(selected)
-        try:
-            pr.main(dry_run=False)  # prepare & loader will read from data/raw_selected
-        except Exception as e:
-            print("[DYNAMIC_FETCH] prepare_and_run_loader failed:", e)
-        try:
-            # run chunk+embed but restrict to processed (prepare_and_run_loader produced processed files)
-            cae.process_and_embed_all(
-                embed_fn=cae.embed_texts_gemini,
-                words_per_chunk=300,
-                overlap_words=30,
-                save_jsonl=True,
-                batch_size=embed_batch_size
-            )
-        except Exception as e:
-            print("[DYNAMIC_FETCH] chunk_and_embed failed:", e)
-        try:
-            ic.ingest()
-            print("[DYNAMIC_FETCH] Full pipeline ingest completed.")
-            return True
-        except Exception as e:
-            print("[DYNAMIC_FETCH] ingest failed after full pipeline:", e)
-            return False
-
-    # Option B (recommended default): FAST fallback ingest abstracts as chunks
-    print("[DYNAMIC_FETCH] Running FAST fallback: ingest title+abstract as chunks (no PDF download).")
-    ok = ingest_abstracts_as_chunks(selected)
-    if ok:
-        print("[DYNAMIC_FETCH] Fast ingest succeeded.")
-        return True
+    parsed_label = safe_strip(parsed.get("label","")).upper()
+    # default conservative decision: HOAX
+    final_label = "HOAX"
+    # if LLM gave VALID or support signals, flip to VALID
+    if parsed_label == "VALID" or supports:
+        final_label = "VALID"
     else:
-        print("[DYNAMIC_FETCH] Fast ingest failed; attempting full pipeline as last resort.")
-        # try full pipeline as last resort
-        try:
-            _write_selected_to_raw_selected(selected)
-            pr.main(dry_run=False)
-            cae.process_and_embed_all(
-                embed_fn=cae.embed_texts_gemini,
-                words_per_chunk=300,
-                overlap_words=30,
-                save_jsonl=True,
-                batch_size=embed_batch_size
-            )
-            ic.ingest()
-            return True
-        except Exception as e:
-            print("[DYNAMIC_FETCH] Full pipeline fallback failed:", e)
-            return False
+        # heuristics using counts + confidence
+        if cnt_vape > cnt_smoke and combined_confidence >= 0.45:
+            final_label = "VALID"
+        elif cnt_smoke > cnt_vape and combined_confidence >= 0.45:
+            final_label = "VALID"
+        else:
+            final_label = "HOAX"
 
-# ---------------------------
-# Main orchestration: verify_claim_local
-# ---------------------------
+    # final confidence blending
+    llm_conf = float(parsed.get("confidence") or 0.0)
+    final_conf = max(llm_conf, combined_confidence)
+    final_conf = max(0.0, min(1.0, float(final_conf)))
 
-def verify_claim_local(claim: str, k: int = 5, dry_run: bool = False) -> Dict[str, Any]:
+    # build conclusion text
+    parts = []
+    parts.append(f"{len(neighbors)} dokumen dianalisis.")
+    if cnt_vape or cnt_smoke:
+        parts.append(f"Bukti terkait vape: {cnt_vape}, bukti terkait rokok: {cnt_smoke}.")
+    if supports and not contradicts:
+        parts.append("Analisis LLM cenderung mendukung klaim.")
+    elif contradicts and not supports:
+        parts.append("Analisis LLM cenderung menolak klaim.")
+    else:
+        parts.append("Tidak ada bukti mayoritas yang jelas; keputusan dibuat berdasarkan gabungan sinyal LLM dan retriever.")
+    parts.append("Ringkasan LLM: " + (analysis_text or "").strip()[:600])
+    conclusion = " ".join([p for p in parts if p])
+
+    return {"final_label": final_label, "final_confidence": final_conf, "conclusion": conclusion}
+
+# -------------------------
+# Main verification flow
+# -------------------------
+def verify_claim_local(claim: str, k: int = 5, dry_run: bool = False, 
+                      enable_expansion: bool = True,
+                      min_relevance: float = 0.25,
+                      force_dynamic_fetch: bool = False,
+                      debug_retrieval: bool = False) -> Dict[str, Any]:
     """
-    Main flow:
-    - embed claim
-    - retrieve neighbors
-    - if none or low-quality neighbors: dynamic_fetch_and_update -> retry retrieve
-    - build prompt and call LLM, parse JSON response
-    - enrich response with DOI & meta from neighbors
+    Main verification flow. Returns dict with key '_frontend_payload' containing
+    the JSON-ready payload for frontend display.
     """
-    claim = claim.strip()
+    claim = safe_strip(claim)
     if not claim:
         raise ValueError("Klaim kosong.")
 
     try:
-        print("[1/5] Membuat embedding klaim...")
-        emb_list = embed_texts_gemini([claim])
-        if not emb_list or not isinstance(emb_list[0], (list, tuple)):
-            raise RuntimeError("Gagal membuat embedding klaim.")
-        query_emb = emb_list[0]
+        print("[1/6] Retrieving with bilingual query expansion...")
+        if enable_expansion:
+            neighbors = retrieve_with_expansion_bilingual(claim, k=k, expand_queries=True, debug=debug_retrieval)
+        else:
+            emb = embed_texts_gemini([claim])[0]
+            neighbors = retrieve_neighbors_from_db(emb, k=k, debug_print=debug_retrieval)
+            neighbors = filter_by_relevance(claim, neighbors, min_relevance=min_relevance, debug=debug_retrieval)
 
-        print(f"[2/5] Mengambil {k} terkait dari database...")
-        neighbors = retrieve_neighbors_from_db(query_emb, k=k, debug_print=True)
+        # Decide whether to dynamic fetch
+        if force_dynamic_fetch:
+            print("[QUALITY_CHECK] Force dynamic fetch requested.")
+            quality_need_fetch = True
+        else:
+            quality_need_fetch = needs_dynamic_fetch(neighbors, claim, min_relevance_mean=min_relevance, min_retriever_mean=0.25, debug=debug_retrieval)
 
-        # If no neighbors or neighbors have low relevance, attempt dynamic fetch
-        need_dynamic = (not neighbors) or (len([n for n in neighbors if n.get("doi")]) == 0)
-        if need_dynamic:
-            print("[INFO] Tidak cukup neighbors (atau belum ada DOI). Mencoba dynamic fetch & ingest...")
+        dyn_selected = None
+        if quality_need_fetch:
+            print("[2/6] Retrieval quality low or insufficient. Attempting dynamic fetch...")
             try:
-                did_update = dynamic_fetch_and_update(claim, max_fetch_results=10, top_k_select=8,
-                                                     embed_batch_size=32, do_full_download=False)
+                did_update, dyn_selected = dynamic_fetch_and_update(claim, max_fetch_results=30, top_k_select=12)
                 if did_update:
-                    # small pause to ensure DB commits are visible
-                    time.sleep(1.5)
-                    neighbors = retrieve_neighbors_from_db(query_emb, k=k, debug_print=True)
-                    if neighbors:
-                        print("[INFO] Found neighbors after dynamic fetch.")
+                    print("[DYNAMIC_FETCH] Ingest performed. Waiting for DB to be ready...")
+                    time.sleep(2.0)
+                    # Retry retrieval after ingest
+                    if enable_expansion:
+                        neighbors = retrieve_with_expansion_bilingual(claim, k=k, expand_queries=True, debug=debug_retrieval)
                     else:
-                        print("[INFO] Masih tidak ada neighbors setelah dynamic fetch.")
+                        emb = embed_texts_gemini([claim])[0]
+                        neighbors = retrieve_neighbors_from_db(emb, k=k*2, debug_print=debug_retrieval)
+                        neighbors = filter_by_relevance(claim, neighbors, min_relevance=min_relevance, debug=debug_retrieval)
+
+                    if debug_retrieval:
+                        print("\n[DEBUG] Neighbors after retry (top 6):")
+                        for i, n in enumerate(neighbors[:6], 1):
+                            print(f"  [{i}] {n.get('safe_id')} rel={n.get('relevance_score',0):.3f} doi={n.get('doi','')}")
+                            print(f"        snippet: {n.get('text','')[:200]}...\n")
+
+                    # If still insufficient, use fetched items as fallback
+                    if needs_dynamic_fetch(neighbors, claim, min_relevance_mean=min_relevance, min_retriever_mean=0.25, debug=debug_retrieval):
+                        print("[DYNAMIC_FETCH] Retry retrieval after dynamic fetch still low quality.")
+                        if dyn_selected:
+                            print("[DYNAMIC_FETCH] Using fetched items as fallback context for LLM.")
+                            fallback_neighbors = []
+                            for idx, s in enumerate(dyn_selected, 1):
+                                txt = (s.get("title","") + "\n\n" + s.get("abstract","")).strip()
+                                if not txt:
+                                    continue
+                                fallback_neighbors.append({
+                                    "doc_id": s.get("doi") or s.get("url") or f"dyn_{idx}",
+                                    "safe_id": s.get("doi") or s.get("url") or f"dyn_{idx}",
+                                    "source_file": "dynamic_fetch_fallback",
+                                    "chunk_index": 0,
+                                    "n_words": len(txt.split()),
+                                    "text": txt,
+                                    "doi": s.get("doi",""),
+                                    "distance": None,
+                                    "relevance_score": 0.8
+                                })
+                            neighbors = fallback_neighbors
+                        else:
+                            # no fallback items -> treat as empty
+                            neighbors = []
                 else:
-                    print("[INFO] dynamic_fetch_and_update returned False (no new data).")
+                    print("[DYNAMIC_FETCH] No new items fetched or ingest failed.")
             except Exception as e:
-                print("[ERROR] dynamic_fetch_and_update exception:", e)
-                traceback.print_exc()
+                print(f"[ERROR] Dynamic fetch failed: {e}")
 
         if not neighbors:
-            # fallback response (no evidence)
-            return {
-                "label": "TIDAK TERDETEKSI",
+            # No docs found: still return HOAX by design plus empty evidence
+            frontend = {
+                "claim": claim,
+                "label": "HOAX",
                 "confidence": 0.0,
-                "summary": "Tidak ditemukan dokumen relevan di database untuk memverifikasi klaim ini.",
+                "summary": "Tidak ditemukan dokumen relevan untuk klaim ini setelah pencarian dan fetch otomatis.",
+                "conclusion": "Tidak ada bukti yang ditemukan.",
                 "evidence": [],
                 "references": [],
-                "methodology_notes": "Database tidak mengandung dokumen yang relevan",
-                "confidence_reasoning": "Tidak ada bukti ilmiah yang tersedia untuk analisis",
+                "metadata": {}
             }
+            print("\n[JSON_OUTPUT]")
+            print(json.dumps(frontend, ensure_ascii=False, indent=2))
+            return {"_frontend_payload": frontend}
+
+        # Translate snippets if needed for LLM prompt
+        neighbors = translate_snippets_if_needed(neighbors, target_lang="Indonesian")
 
         if dry_run:
-            print("=== Dry Run: Neighbors list ===")
-            for n in neighbors:
-                doi_info = f" (DOI: {n.get('doi','')})" if n.get('doi') else ""
-                print(f"{n.get('safe_id')} {doi_info} dist={n.get('distance')}")
-                print(f"  Preview: {n.get('text','')[:200]}...\n")
+            print("\n=== DRY RUN: Neighbors ===")
+            for i, n in enumerate(neighbors, 1):
+                rel = n.get('relevance_score', 0)
+                print(f"\n[{i}] {n.get('safe_id')} (relevance: {rel:.3f})")
+                print(f"DOI: {n.get('doi', 'N/A')}")
+                print(f"Text: {n.get('_text_translated', n.get('text',''))[:400]}...")
             return {"dry_run_neighbors": neighbors}
 
-        print("[3/5] Membangun prompt RAG...")
-        prompt = build_prompt(claim, neighbors)
-        print(f"[DEBUG] Prompt length: {len(prompt)} chars")
+        print(f"[3/6] Building prompt with {len(neighbors)} relevant neighbors...")
+        prompt = build_prompt(claim, neighbors, max_context_chars=3500)
 
-        print("[4/5] Memanggil LLM (Gemini) untuk verifikasi...")
-        raw = call_gemini(prompt, temperature=0.0, max_output_tokens=1500)
+        print("[4/6] Calling LLM for verification...")
+        raw = ""
+        try:
+            raw = call_gemini(prompt, temperature=0.0, max_output_tokens=1600)
+        except Exception as e:
+            print(f"[ERROR] call_gemini failed: {e}")
+            raw = ""
 
-        print("[5/5] Memparsing hasil...")
-        parsed = extract_json_from_text(raw)
+        if raw:
+            print("[5/6] Parsing result from LLM...")
+            parsed = extract_json_from_text(raw)
+        else:
+            parsed = validate_and_normalize_result({})
 
-        # enrich evidence & references with DOI and snippet from neighbors
+        # ----------------- Enrichment (A2/A3 already applied upstream) -----------------
+        print("[6/6] Enriching with metadata and building frontend payload...")
         nb_map = {n.get("safe_id") or str(n.get("doc_id")): n for n in neighbors}
+
         evlist = parsed.get("evidence", []) or []
         references = []
         for ev in evlist:
-            sid = ev.get("safe_id")
+            sid = ev.get("safe_id") or ev.get("id") or ev.get("doc_id") or ""
             nb = nb_map.get(sid)
             if nb:
-                ev["source_snippet"] = nb.get("text","")[:400]
-                ev["doi"] = nb.get("doi","") or ev.get("doi","")
-                ref_entry = {"safe_id": sid, "doi": ev.get("doi",""), "source_type": "journal" if ev.get("doi") else "other"}
-                if ref_entry not in references:
+                ev["source_snippet"] = safe_strip(nb.get("_text_translated", nb.get("text", "")))[:400]
+                doi_val = safe_strip(nb.get("doi", "") or ev.get("doi", "") or "")
+                ev["doi"] = doi_val
+                ev["relevance_score"] = float(nb.get("relevance_score", 0.0))
+                url_val = ""
+                if doi_val:
+                    doi_norm = re.sub(r'^(urn:doi:|doi:)\s*', '', doi_val, flags=re.I)
+                    url_val = f"https://doi.org/{doi_norm}"
+                else:
+                    url_val = safe_strip(nb.get("source_url") or nb.get("source") or nb.get("source_file") or "")
+                ev["url"] = url_val
+                ref_entry = {
+                    "safe_id": sid,
+                    "doi": doi_val,
+                    "url": url_val,
+                    "source_type": "journal" if doi_val else "other",
+                    "relevance": ev.get("relevance_score", 0.0)
+                }
+                if not any(r.get("safe_id") == ref_entry["safe_id"] and r.get("url") == ref_entry["url"] for r in references):
+                    references.append(ref_entry)
+            else:
+                ev["source_snippet"] = ev.get("snippet", "")[:400]
+                ev["doi"] = safe_strip(ev.get("doi", ""))
+                ev["relevance_score"] = float(ev.get("relevance_score", 0.0))
+                if ev.get("doi"):
+                    doi_norm = re.sub(r'^(urn:doi:|doi:)\s*', '', ev.get("doi"), flags=re.I)
+                    ev["url"] = f"https://doi.org/{doi_norm}"
+                else:
+                    ev["url"] = ""
+                ref_entry = {
+                    "safe_id": ev.get("safe_id") or ev.get("doi") or "",
+                    "doi": ev.get("doi", ""),
+                    "url": ev.get("url", ""),
+                    "source_type": "journal" if ev.get("doi") else "other",
+                    "relevance": ev.get("relevance_score", 0.0)
+                }
+                if ref_entry["safe_id"] and not any(r.get("safe_id") == ref_entry["safe_id"] for r in references):
                     references.append(ref_entry)
 
         parsed["references"] = references
 
-        # compute retriever mean & combined confidence
+        # Compute retriever/relevance metrics
         sim_scores = []
+        rel_scores = []
         for n in neighbors:
             sim_scores.append(distance_to_similarity(n.get("distance")))
+            rel_scores.append(n.get("relevance_score", 0.0))
+
         retriever_mean = float(sum(sim_scores) / len(sim_scores)) if sim_scores else 0.0
+        relevance_mean = float(sum(rel_scores) / len(rel_scores)) if rel_scores else 0.0
         llm_confidence = float(parsed.get("confidence") or 0.0)
-        combined_confidence = 0.7 * llm_confidence + 0.3 * retriever_mean
+
+        combined_confidence = (
+            0.5 * llm_confidence +
+            0.3 * relevance_mean +
+            0.2 * retriever_mean
+        )
 
         parsed["_meta"] = {
             "neighbors_count": len(neighbors),
             "neighbors_with_doi": len([n for n in neighbors if n.get("doi")]),
-            "retriever_mean": retriever_mean,
+            "retriever_mean_similarity": retriever_mean,
+            "relevance_mean": relevance_mean,
             "combined_confidence": combined_confidence,
             "prompt_len_chars": len(prompt),
-            "raw_llm_preview": raw[:500] if raw else ""
+            "query_expansion_used": enable_expansion,
+            "raw_llm_preview": safe_strip(raw)[:500] if raw else ""
         }
 
-        # final confidence normalization: prefer combined_confidence if LLM-old value is low
-        parsed["confidence"] = float(parsed.get("confidence") or combined_confidence)
-        if parsed.get("label") not in ["VALID", "HOAX", "TIDAK TERDETEKSI"]:
-            parsed["label"] = "TIDAK TERDETEKSI"
+        # Adjust confidence & label
+        if llm_confidence < 0.3:
+            parsed["confidence"] = combined_confidence
+        else:
+            parsed["confidence"] = llm_confidence
 
-        return parsed
+        parsed = validate_and_normalize_result(parsed)
+        final_dec = decide_final_label_and_summary(parsed, neighbors, combined_confidence)
+        parsed["final_label"] = final_dec["final_label"]
+        parsed["final_confidence"] = final_dec["final_confidence"]
+        parsed["conclusion"] = final_dec["conclusion"]
+        parsed["label"] = parsed["final_label"]
+        parsed["confidence"] = parsed["final_confidence"]
+
+        # Normalize evidence list for frontend
+        frontend_evidence = []
+        for ev in parsed.get("evidence", []):
+            sid = ev.get("safe_id") or ev.get("id") or ev.get("doc_id") or ""
+            nb = nb_map.get(sid) or {}
+            item = {
+                "safe_id": sid,
+                "snippet": safe_strip(ev.get("snippet") or ev.get("text") or nb.get("text", "") )[:400],
+                "source_snippet": safe_strip(ev.get("source_snippet") or nb.get("_text_translated") or nb.get("text",""))[:400],
+                "doi": safe_strip(ev.get("doi","") or nb.get("doi","") or ""),
+                "url": safe_strip(ev.get("url","") or (f"https://doi.org/{ev.get('doi')}" if ev.get("doi") else nb.get("source_url") or nb.get("source") or nb.get("source_file") or "")),
+                "relevance_score": float(ev.get("relevance_score", 0.0))
+            }
+            frontend_evidence.append(item)
+
+        if not frontend_evidence:
+            for n in neighbors[:6]:
+                sid = n.get("safe_id") or n.get("doc_id") or ""
+                doi_val = safe_strip(n.get("doi","") or "")
+                url_val = f"https://doi.org/{doi_val}" if doi_val else safe_strip(n.get("source_url") or n.get("source") or n.get("source_file") or "")
+                frontend_evidence.append({
+                    "safe_id": sid,
+                    "snippet": safe_strip(n.get("_text_translated") or n.get("text",""))[:400],
+                    "source_snippet": safe_strip(n.get("_text_translated") or n.get("text",""))[:400],
+                    "doi": doi_val,
+                    "url": url_val,
+                    "relevance_score": float(n.get("relevance_score", 0.0))
+                })
+
+        parsed["evidence"] = frontend_evidence
+        parsed["references"] = references
+
+        # Build frontend payload
+        frontend = {
+            "claim": claim,
+            "label": parsed.get("label", "HOAX"),
+            "confidence": float(parsed.get("confidence", 0.0)),
+            "summary": parsed.get("summary", "") or parsed.get("analysis", "") or "",
+            "conclusion": parsed.get("conclusion", ""),
+            "evidence": parsed.get("evidence", []),
+            "references": parsed.get("references", []),
+            "metadata": parsed.get("_meta", {})
+        }
+
+        # Print JSON_OUTPUT for frontend and return payload
+        print("\n[JSON_OUTPUT]")
+        print(json.dumps(frontend, ensure_ascii=False, indent=2))
+
+        return {"_frontend_payload": frontend}
 
     except Exception as e:
-        print("[ERROR] Exception in verify_claim_local:", str(e))
+        print(f"[ERROR] Exception in verify_claim_local: {str(e)}")
         traceback.print_exc()
-        # raise again so CLI can handle exit code if desired
         raise
 
-# ---------------------------
+# -------------------------
 # CLI entrypoint
-# ---------------------------
-
+# -------------------------
 def main():
-    ap = argparse.ArgumentParser(description="Prompt & verify (local) - Healthify RAG helper")
-    ap.add_argument("--claim", "-c", type=str, help="Klaim teks yang ingin diverifikasi (atau kosong untuk mode interaktif)")
-    ap.add_argument("--k", "-k", type=int, default=5, help="Jumlah neighbor yg diambil dari vector DB")
-    ap.add_argument("--dry-run", action="store_true", help="Tampilkan neighbor saja tanpa memanggil LLM")
-    ap.add_argument("--save-json", type=str, default=None, help="Simpan hasil JSON ke file (path)")
-    ap.add_argument("--full-download", action="store_true", help="Saat dynamic fetch, lakukan full PDF download+processing (lebih lambat)")
+    ap = argparse.ArgumentParser(
+        description="Improved Prompt & Verify - Healthify RAG with bilingual retrieval"
+    )
+    ap.add_argument("--claim", "-c", type=str,
+                   help="Klaim yang akan diverifikasi (kosong untuk mode interaktif)")
+    ap.add_argument("--k", "-k", type=int, default=5,
+                   help="Jumlah neighbor yang diambil (default: 5)")
+    ap.add_argument("--dry-run", action="store_true",
+                   help="Tampilkan neighbors saja tanpa LLM call")
+    ap.add_argument("--no-expansion", action="store_true",
+                   help="Disable query expansion (gunakan single query)")
+    ap.add_argument("--min-relevance", type=float, default=0.25,
+                   help="Minimum relevance score untuk filter (default: 0.25)")
+    ap.add_argument("--save-json", type=str, default=None,
+                   help="Simpan hasil ke file JSON")
+    ap.add_argument("--force-dynamic-fetch", action="store_true",
+                   help="Memaksa dynamic fetch meskipun retrieval awal tampak cukup")
+    ap.add_argument("--debug-retrieval", action="store_true",
+                   help="Cetak debug retrieval/relevance lebih detail")
     args = ap.parse_args()
 
     claim = args.claim
@@ -742,23 +1149,53 @@ def main():
         print("Masukan klaim (akhiri dengan ENTER): ")
         claim = input("> ").strip()
 
-    try:
-        # pass do_full_download from CLI flag to dynamic fetch via verify_claim_local path
-        result = verify_claim_local(claim, k=args.k, dry_run=args.dry_run)
-    except Exception as e:
-        print("Gagal verifikasi klaim:", str(e))
+    if not claim:
+        print("Error: Klaim tidak boleh kosong")
         sys.exit(1)
 
-    pretty = json.dumps(result, indent=2, ensure_ascii=False)
-    print("=== Hasil Verifikasi ===")
-    print(pretty)
+    try:
+        result = verify_claim_local(
+            claim,
+            k=args.k,
+            dry_run=args.dry_run,
+            enable_expansion=not args.no_expansion,
+            min_relevance=args.min_relevance,
+            force_dynamic_fetch=args.force_dynamic_fetch,
+            debug_retrieval=args.debug_retrieval
+        )
+    except Exception as e:
+        print(f"\n❌ Gagal verifikasi klaim: {str(e)}")
+        sys.exit(1)
 
-    if args.save_json:
+    # Human-friendly summary (kept) and JSON already printed
+    print("\n" + "="*60)
+    print("HASIL VERIFIKASI (ringkasan human-readable)")
+    print("="*60)
+
+    frontend = result.get("_frontend_payload") if isinstance(result, dict) else None
+    if frontend:
+        print(f"\n📋 KLAIM: {frontend.get('claim')}")
+        print(f"\n🏷️  LABEL: {frontend.get('label')}")
+        print(f"📊 CONFIDENCE: {frontend.get('confidence'):.2%}")
+        print(f"\n💡 SUMMARY:\n{frontend.get('summary','')}")
+        print(f"\n🔍 CONCLUSION:\n{frontend.get('conclusion','')}")
+        meta = frontend.get("metadata", {})
+        if meta:
+            print(f"\n📈 METADATA:")
+            print(f"   - Neighbors retrieved: {meta.get('neighbors_count', 0)}")
+            print(f"   - Neighbors with DOI: {meta.get('neighbors_with_doi', 0)}")
+            print(f"   - Mean relevance score: {meta.get('relevance_mean', 0):.3f}")
+            print(f"   - Mean similarity score: {meta.get('retriever_mean_similarity', 0):.3f}")
+            print(f"   - Combined confidence: {meta.get('combined_confidence', 0):.2%}")
+
+    if args.save_json and frontend:
         with open(args.save_json, "w", encoding="utf-8") as fo:
-            json.dump(result, fo, ensure_ascii=False, indent=2)
-        print(f"Hasil disimpan di {args.save_json}")
+            json.dump(frontend, fo, ensure_ascii=False, indent=2)
+        print(f"\n💾 Hasil disimpan ke: {args.save_json}")
 
-    print("Selesai.")
+    print("\n" + "="*60)
+    print("✅ Selesai.")
+    print("="*60)
 
 if __name__ == "__main__":
     main()

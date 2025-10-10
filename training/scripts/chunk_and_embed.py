@@ -139,12 +139,29 @@ def embed_texts_gemini(
 
                 # normalisasi tiap embedding menjadi list of float
                 for emb in emb_list:
-                    embeddings.append(list(emb))
+                    # Handle berbagai format embedding
+                    if hasattr(emb, 'values'):
+                        # Format objek dengan atribut values
+                        embedding_values = list(emb.values)
+                    elif isinstance(emb, dict) and 'values' in emb:
+                        # Format dictionary dengan key 'values'
+                        embedding_values = list(emb['values'])
+                    elif isinstance(emb, tuple) and len(emb) == 2 and emb[0] == 'values':
+                        # Format tuple ('values', [embedding_list])
+                        embedding_values = list(emb[1])
+                    elif isinstance(emb, list):
+                        # Sudah berupa list
+                        embedding_values = list(emb)
+                    else:
+                        # Fallback - coba konversi langsung
+                        embedding_values = list(emb)
+                    
+                    embeddings.append(embedding_values)
 
                 break
 
             except Exception as e:
-                is_last = (attempt ==max_retries - 1)
+                is_last = (attempt == max_retries - 1)
                 print(f"[gemini-embed] batch {i}-{i+len(batch)-1}, attempt {attempt+1} failed: {e}")
 
                 if is_last:
@@ -157,7 +174,8 @@ def embed_texts_gemini(
         raise RuntimeError(f"Jumlah Embedding mismatch: got {len(embeddings)} embeddings for {len(texts)} inputs")
     
     return embeddings
-    
+
+
 # membuat chunk, embed dan menyimpannya
 def process_and_embed_all(
     embed_fn: Callable[[List[str]], List[List[float]]],
@@ -203,6 +221,7 @@ def process_and_embed_all(
                         "chunk_index": idx,
                         "text": txt,
                         "n_words": len(txt.split()),
+                        "doi": doc.get("doi") or doc.get("metadata", {}).get("doi") or None,
                         "embedding": emb
                     }
                     fo.write(json.dumps(record, ensure_ascii=False) + "\n")

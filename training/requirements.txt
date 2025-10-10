@@ -2,8 +2,8 @@
 langchain>=0.3,<0.4
 
 # Google Gemini integration
-google-genai>=0.8.3
-langchain-google-genai>=2.1.12
+google-genai
+langchain-google-genai
 
 # Vectorstores / embeddings
 sentence-transformers

@@ -336,3 +336,16 @@ timestamp,source,query,file,status,notes
 2025-10-07T18:11:17.088912+00:00,semantic_scholar,advancements in cancer treatment,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
 "
 2025-10-07T18:11:17.292897+00:00,semantic_scholar,advancements in cancer treatment,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\semantic_scholar_advancements_in_cancer_treatment_1759860677.json,success,"search_returned:5, details_returned:0"
+2025-10-09T12:36:59.648146+00:00,pubmed,rokok menyebabkan kanker,,error,"HTTPSConnectionPool(host='eutils.ncbi.nlm.nih.gov', port=443): Max retries exceeded with url: /entrez/eutils/esearch.fcgi?db=pubmed&retmode=json&retmax=5&term=rokok+menyebabkan+kanker&api_key=e81e713d4595aa302e8015b74d8dac7bec08 (Caused by NameResolutionError(""<urllib3.connection.HTTPSConnection object at 0x00000201A921C310>: Failed to resolve 'eutils.ncbi.nlm.nih.gov' ([Errno 11001] getaddrinfo failed)""))"
+2025-10-09T12:37:02.452058+00:00,crossref,rokok menyebabkan kanker,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_rokok_menyebabkan_kanker_1760013422.json,success,5 articles retrieved.
+2025-10-09T12:37:06.365286+00:00,semantic_scholar,rokok menyebabkan kanker,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-09T12:37:06.948848+00:00,semantic_scholar,rokok menyebabkan kanker,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-09T12:37:08.153583+00:00,semantic_scholar,rokok menyebabkan kanker,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-09T12:37:09.161777+00:00,semantic_scholar,rokok menyebabkan kanker,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-09T12:37:11.153706+00:00,semantic_scholar,rokok menyebabkan kanker,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-09T12:37:11.356422+00:00,semantic_scholar,rokok menyebabkan kanker,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\semantic_scholar_rokok_menyebabkan_kanker_1760013431.json,success,"search_returned:5, details_returned:0"

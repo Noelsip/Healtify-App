@@ -71,6 +71,7 @@ def ensure_table(connect, vector_dim):
                 chunk_index integer,
                 n_words integer,
                 text text,
+                doi text,
                 embedding vector({vector_dim}),
                 created_at TIMESTAMPTZ DEFAULT NOW()
             );
@@ -123,6 +124,7 @@ def prepare_tuple_from_record(rec: dict) -> Tuple:
         rec.get("chunk_index"),
         rec.get("n_words"),
         rec.get("text"),
+        rec.get("doi"),
         emb_str,
     )
 
@@ -197,8 +199,9 @@ def ingest():
                     to_insert.append(prepare_tuple_from_record(record))
 
                     if len(to_insert) >= BATCH_SIZE:
-                        sql = f"INSERT INTO {DB_TABLE} (doc_id, safe_id, source_file, chunk_index, n_words, text, embedding) VALUES %s"
-                        template = "(%s,%s,%s,%s,%s,%s,%s::vector)"
+                        sql = f"INSERT INTO {DB_TABLE} (doc_id, safe_id, source_file, chunk_index, n_words, text, doi, embedding) VALUES %s"
+                        template = "(%s,%s,%s,%s,%s,%s,%s,%s::vector)"
+
                         logger.debug("Contoh tuple sebelum insert: %r", to_insert[0] if to_insert else None)
                         execute_values(cursor, sql, to_insert, template=template, page_size=100)
                         connect.commit()
@@ -209,8 +212,9 @@ def ingest():
                 
                 # insert sisa data di akhir file
                 if to_insert:
-                    sql = f"INSERT INTO {DB_TABLE} (doc_id, safe_id, source_file, chunk_index, n_words, text, embedding) VALUES %s"
-                    template = "(%s,%s,%s,%s,%s,%s,%s::vector)"
+                    sql = f"INSERT INTO {DB_TABLE} (doc_id, safe_id, source_file, chunk_index, n_words, text, doi, embedding) VALUES %s"
+                    template = "(%s,%s,%s,%s,%s,%s,%s,%s::vector)"
+
                     logger.debug("Contoh tuple final sebelum insert: %r", to_insert[0])
                     execute_values(cursor, sql, to_insert, template=template, page_size=100)
                     connect.commit()

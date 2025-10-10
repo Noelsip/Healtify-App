@@ -757,3 +757,192 @@ timestamp,source,query,file,status,notes
 2025-10-10T18:54:58.452155+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
 "
 2025-10-10T18:54:58.655458+00:00,semantic_scholar,minum susu setiap hari membuat tubuh sehat,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\semantic_scholar_minum_susu_setiap_hari_membuat_tubuh_sehat_1760122498.json,success,"search_returned:30, details_returned:0"
+2025-10-10T18:59:36.328066+00:00,pubmed,jogging membuat tubuh sehat,,no results,No articles found for the given query.
+2025-10-10T18:59:38.386043+00:00,crossref,jogging membuat tubuh sehat,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_jogging_membuat_tubuh_sehat_1760122778.json,success,30 articles retrieved.
+2025-10-10T18:59:42.569061+00:00,semantic_scholar,jogging membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:59:43.494293+00:00,semantic_scholar,jogging membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:59:44.097162+00:00,semantic_scholar,jogging membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:59:45.093541+00:00,semantic_scholar,jogging membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:59:46.055939+00:00,semantic_scholar,jogging membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:59:46.998296+00:00,semantic_scholar,jogging membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:59:47.923221+00:00,semantic_scholar,jogging membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:59:48.871201+00:00,semantic_scholar,jogging membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:59:49.452941+00:00,semantic_scholar,jogging membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:59:50.404650+00:00,semantic_scholar,jogging membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:59:50.977689+00:00,semantic_scholar,jogging membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:59:53.578349+00:00,semantic_scholar,jogging membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:59:54.142996+00:00,semantic_scholar,jogging membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:59:55.078406+00:00,semantic_scholar,jogging membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:59:56.040690+00:00,semantic_scholar,jogging membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:59:56.599926+00:00,semantic_scholar,jogging membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:59:57.537352+00:00,semantic_scholar,jogging membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:59:58.470250+00:00,semantic_scholar,jogging membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T18:59:59.415392+00:00,semantic_scholar,jogging membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:00:00.337881+00:00,semantic_scholar,jogging membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:00:01.251710+00:00,semantic_scholar,jogging membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:00:03.586925+00:00,semantic_scholar,jogging membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:00:04.487962+00:00,semantic_scholar,jogging membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:00:05.403050+00:00,semantic_scholar,jogging membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:00:06.326156+00:00,semantic_scholar,jogging membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:00:07.259044+00:00,semantic_scholar,jogging membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:00:08.180149+00:00,semantic_scholar,jogging membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:00:09.130832+00:00,semantic_scholar,jogging membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:00:10.050359+00:00,semantic_scholar,jogging membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:00:10.989490+00:00,semantic_scholar,jogging membuat tubuh sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:00:11.192783+00:00,semantic_scholar,jogging membuat tubuh sehat,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\semantic_scholar_jogging_membuat_tubuh_sehat_1760122811.json,success,"search_returned:30, details_returned:0"
+2025-10-10T19:04:06.385315+00:00,pubmed,bitcoin tentang kesehata,,no results,No articles found for the given query.
+2025-10-10T19:04:08.654603+00:00,crossref,bitcoin tentang kesehata,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_bitcoin_tentang_kesehata_1760123048.json,success,30 articles retrieved.
+2025-10-10T19:04:11.079288+00:00,semantic_scholar,bitcoin tentang kesehata,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:04:12.343954+00:00,semantic_scholar,bitcoin tentang kesehata,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:04:13.601507+00:00,semantic_scholar,bitcoin tentang kesehata,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:04:14.740478+00:00,semantic_scholar,bitcoin tentang kesehata,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:04:15.654623+00:00,semantic_scholar,bitcoin tentang kesehata,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:04:16.569944+00:00,semantic_scholar,bitcoin tentang kesehata,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:04:17.509015+00:00,semantic_scholar,bitcoin tentang kesehata,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:04:18.480526+00:00,semantic_scholar,bitcoin tentang kesehata,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:04:19.397983+00:00,semantic_scholar,bitcoin tentang kesehata,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:04:21.649315+00:00,semantic_scholar,bitcoin tentang kesehata,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:04:22.632966+00:00,semantic_scholar,bitcoin tentang kesehata,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:04:23.210114+00:00,semantic_scholar,bitcoin tentang kesehata,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:04:24.007865+00:00,semantic_scholar,bitcoin tentang kesehata,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:04:25.316863+00:00,semantic_scholar,bitcoin tentang kesehata,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:04:26.570266+00:00,semantic_scholar,bitcoin tentang kesehata,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:04:27.839747+00:00,semantic_scholar,bitcoin tentang kesehata,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:04:29.325355+00:00,semantic_scholar,bitcoin tentang kesehata,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:04:30.564799+00:00,semantic_scholar,bitcoin tentang kesehata,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:04:31.754494+00:00,semantic_scholar,bitcoin tentang kesehata,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:04:32.837778+00:00,semantic_scholar,bitcoin tentang kesehata,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:04:33.768234+00:00,semantic_scholar,bitcoin tentang kesehata,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:04:34.823080+00:00,semantic_scholar,bitcoin tentang kesehata,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:04:35.827207+00:00,semantic_scholar,bitcoin tentang kesehata,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:04:37.110689+00:00,semantic_scholar,bitcoin tentang kesehata,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:04:38.315989+00:00,semantic_scholar,bitcoin tentang kesehata,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:04:39.530033+00:00,semantic_scholar,bitcoin tentang kesehata,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:04:40.905455+00:00,semantic_scholar,bitcoin tentang kesehata,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:04:41.992656+00:00,semantic_scholar,bitcoin tentang kesehata,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:04:43.094856+00:00,semantic_scholar,bitcoin tentang kesehata,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:04:44.157719+00:00,semantic_scholar,bitcoin tentang kesehata,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:04:44.361196+00:00,semantic_scholar,bitcoin tentang kesehata,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\semantic_scholar_bitcoin_tentang_kesehata_1760123084.json,success,"search_returned:30, details_returned:0"
+2025-10-10T19:23:26.852036+00:00,pubmed,profit bitcoin membuat sehat,,no results,No articles found for the given query.
+2025-10-10T19:23:29.151563+00:00,crossref,profit bitcoin membuat sehat,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_profit_bitcoin_membuat_sehat_1760124209.json,success,30 articles retrieved.
+2025-10-10T19:23:33.229304+00:00,semantic_scholar,profit bitcoin membuat sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:23:34.147341+00:00,semantic_scholar,profit bitcoin membuat sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:23:34.709263+00:00,semantic_scholar,profit bitcoin membuat sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:23:35.616371+00:00,semantic_scholar,profit bitcoin membuat sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:23:36.532501+00:00,semantic_scholar,profit bitcoin membuat sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:23:37.449732+00:00,semantic_scholar,profit bitcoin membuat sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:23:38.370369+00:00,semantic_scholar,profit bitcoin membuat sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:23:38.923014+00:00,semantic_scholar,profit bitcoin membuat sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:23:39.851536+00:00,semantic_scholar,profit bitcoin membuat sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:23:40.426179+00:00,semantic_scholar,profit bitcoin membuat sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:23:43.010733+00:00,semantic_scholar,profit bitcoin membuat sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:23:43.915408+00:00,semantic_scholar,profit bitcoin membuat sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:23:44.841991+00:00,semantic_scholar,profit bitcoin membuat sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:23:45.780537+00:00,semantic_scholar,profit bitcoin membuat sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:23:46.716301+00:00,semantic_scholar,profit bitcoin membuat sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:23:47.286503+00:00,semantic_scholar,profit bitcoin membuat sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:23:47.882506+00:00,semantic_scholar,profit bitcoin membuat sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:23:50.121643+00:00,semantic_scholar,profit bitcoin membuat sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:23:51.069491+00:00,semantic_scholar,profit bitcoin membuat sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:23:51.633648+00:00,semantic_scholar,profit bitcoin membuat sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:23:52.561509+00:00,semantic_scholar,profit bitcoin membuat sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:23:53.491134+00:00,semantic_scholar,profit bitcoin membuat sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:23:54.404839+00:00,semantic_scholar,profit bitcoin membuat sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:23:55.388019+00:00,semantic_scholar,profit bitcoin membuat sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:23:56.326298+00:00,semantic_scholar,profit bitcoin membuat sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:23:58.832901+00:00,semantic_scholar,profit bitcoin membuat sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:23:59.796055+00:00,semantic_scholar,profit bitcoin membuat sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:24:00.931875+00:00,semantic_scholar,profit bitcoin membuat sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:24:01.840128+00:00,semantic_scholar,profit bitcoin membuat sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:24:02.827417+00:00,semantic_scholar,profit bitcoin membuat sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-10T19:24:03.030950+00:00,semantic_scholar,profit bitcoin membuat sehat,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\semantic_scholar_profit_bitcoin_membuat_sehat_1760124243.json,success,"search_returned:30, details_returned:0"

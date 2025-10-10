@@ -1033,6 +1033,7 @@ def verify_claim_local(claim: str, k: int = 5, dry_run: bool = False,
         relevance_mean = float(sum(rel_scores) / len(rel_scores)) if rel_scores else 0.0
         llm_confidence = float(parsed.get("confidence") or 0.0)
 
+        # retriever_mean and relevance_mean already dihitung di atas
         combined_confidence = (
             0.5 * llm_confidence +
             0.3 * relevance_mean +
@@ -1050,17 +1051,43 @@ def verify_claim_local(claim: str, k: int = 5, dry_run: bool = False,
             "raw_llm_preview": safe_strip(raw)[:500] if raw else ""
         }
 
-        # Adjust confidence & label
-        if llm_confidence < 0.3:
-            parsed["confidence"] = combined_confidence
-        else:
-            parsed["confidence"] = llm_confidence
+        # -----------------------------
+        # Adjust confidence & final label (DETERMINISTIC)
+        # -----------------------------
+        # Thresholds (sesuaikan jika perlu)
+        LLM_CONF_THRESHOLD = 0.50   # jika LLM confidence >= ini, prefer LLM label
+        COMBINED_CONF_THRESHOLD = 0.50  # fallback threshold dari combined signal
 
+        # Pastikan parsed ter-normalize dulu
         parsed = validate_and_normalize_result(parsed)
-        final_dec = decide_final_label_and_summary(parsed, neighbors, combined_confidence)
-        parsed["final_label"] = final_dec["final_label"]
-        parsed["final_confidence"] = final_dec["final_confidence"]
-        parsed["conclusion"] = final_dec["conclusion"]
+        llm_label = parsed.get("label", "").upper()
+        llm_confidence = float(parsed.get("confidence", 0.0))
+
+        # Final decision logic:
+        # 1) Jika LLM mengembalikan VALID/HOAX dan confidence LLM >= LLM_CONF_THRESHOLD -> gunakan LLM.
+        # 2) Jika tidak -> gunakan combined_confidence: jika >= COMBINED_CONF_THRESHOLD -> VALID, else HOAX.
+        final_label = "HOAX"
+        final_confidence = 0.0
+        decision_reason = ""
+
+        if llm_label in ["VALID", "HOAX"] and llm_confidence >= LLM_CONF_THRESHOLD:
+            final_label = llm_label
+            final_confidence = llm_confidence
+            decision_reason = f"Used LLM verdict (label={llm_label}, confidence={llm_confidence:.2f})"
+        else:
+            if combined_confidence >= COMBINED_CONF_THRESHOLD:
+                final_label = "VALID"
+            else:
+                final_label = "HOAX"
+            final_confidence = combined_confidence
+            decision_reason = f"Used combined retriever+LLM fallback (combined_confidence={combined_confidence:.2f})"
+
+        # Attach final decision to parsed
+        parsed["final_label"] = final_label
+        parsed["final_confidence"] = float(final_confidence)
+        parsed["decision_reason"] = decision_reason
+
+        # Force output label/confidence ke final label (hanya VALID/HOAX)
         parsed["label"] = parsed["final_label"]
         parsed["confidence"] = parsed["final_confidence"]
 

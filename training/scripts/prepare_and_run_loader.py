@@ -2,12 +2,15 @@ import json
 import re
 import csv
 import socket
+import argparse
 from pathlib import Path
-from tqdm import tqdm
+from typing import List, Dict, Any, Set
 from datetime import datetime
+from tqdm import tqdm
+
 from loader import process_api_result as run_loader
 
-# === Konfigurasi utama ===
+# Configuration
 BASE = Path(__file__).parents[1]
 RAW_DIR = BASE / "data" / "raw"
 META_DIR = BASE / "data" / "metadata"
@@ -17,58 +20,81 @@ ERROR_LOG_PATH = META_DIR / "loader_errors.csv"
 SUCCESS_LOG_PATH = META_DIR / "loader_success.csv"
 CLEANED_ITEMS_PATH = META_DIR / "api_items_cleaned.json"
 
-# === Utilitas log dan validasi ===
+
 def log_error(url: str, reason: str):
-    """Simpan log error ke CSV"""
+    """Simpan log error ke CSV file untuk tracking."""
     header = ["timestamp", "url", "reason"]
-    new_file = not ERROR_LOG_PATH.exists()
+    is_new_file = not ERROR_LOG_PATH.exists()
+    
     with open(ERROR_LOG_PATH, "a", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        if new_file:
+        if is_new_file:
             writer.writerow(header)
         writer.writerow([datetime.now().isoformat(), url, reason])
 
+
 def log_success(url: str, file_path: str):
-    """Simpan log sukses ke CSV"""
+    """Simpan log success ke CSV file untuk tracking."""
     header = ["timestamp", "url", "file_path"]
-    new_file = not SUCCESS_LOG_PATH.exists()
+    is_new_file = not SUCCESS_LOG_PATH.exists()
+    
     with open(SUCCESS_LOG_PATH, "a", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        if new_file:
+        if is_new_file:
             writer.writerow(header)
         writer.writerow([datetime.now().isoformat(), url, file_path])
 
-def is_private_ip(url: str) -> bool:
-    """Cek apakah URL mengarah ke IP privat"""
+
+def is_private_ip_address(url: str) -> bool:
+    """Cek apakah URL mengarah ke IP address privat untuk keamanan."""
     try:
+        # Extract hostname from URL
         host = url.split("//")[1].split("/")[0].split(":")[0]
         ip = socket.gethostbyname(host)
-        return ip.startswith(("10.", "172.", "192.168."))
+        
+        # Check if IP is in private ranges
+        private_ranges = ("10.", "172.", "192.168.")
+        return ip.startswith(private_ranges)
     except Exception:
         return False
 
-def extract_pdf_urls_from_crossref(obj):
-    """Ambil PDF URL dari file CrossRef"""
+
+def extract_pdf_urls_from_crossref(crossref_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Extract PDF URLs dan metadata dari data CrossRef."""
     results = []
-    items = obj.get("message", {}).get("items", []) or []
-    for it in items:
-        doi = it.get("DOI")
-        title_list = it.get("title") or []
+    items = crossref_data.get("message", {}).get("items", []) or []
+    
+    for item in items:
+        doi = item.get("DOI")
+        title_list = item.get("title") or []
         title = title_list[0] if title_list else ""
-        links = it.get("link", []) or []
+        
+        # Look for PDF links
         pdf_url = None
-        for l in links:
-            url = l.get("URL") or l.get("url")
-            ctype = (l.get("content-type") or "").lower()
-            if url and (".pdf" in url.lower() or "application/pdf" in ctype):
+        links = item.get("link", []) or []
+        
+        for link in links:
+            url = link.get("URL") or link.get("url")
+            content_type = (link.get("content-type") or "").lower()
+            
+            if url and (".pdf" in url.lower() or "application/pdf" in content_type):
                 pdf_url = url
                 break
+        
+        # Fallback: check main URL
         if not pdf_url:
-            maybe = it.get("URL")
-            if maybe and maybe.lower().endswith(".pdf"):
-                pdf_url = maybe
+            main_url = item.get("URL")
+            if main_url and main_url.lower().endswith(".pdf"):
+                pdf_url = main_url
+        
         if pdf_url:
-            identifier = doi.replace("/", "_") if doi else re.sub(r"\W+", "_", title)[:50] or "crossref_doc"
+            # Generate safe identifier
+            identifier = (
+                doi.replace("/", "_") if doi 
+                else re.sub(r"\W+", "_", title)[:50] 
+                or "crossref_doc"
+            )
+            
             results.append({
                 "id": identifier,
                 "pdf_url": pdf_url,
@@ -76,28 +102,57 @@ def extract_pdf_urls_from_crossref(obj):
                 "doi": doi,
                 "source": "crossref"
             })
+    
     return results
 
-def extract_pdf_from_semantic_scholar(obj):
-    """Ambil PDF URL dari Semantic Scholar"""
+
+def extract_pdf_urls_from_semantic_scholar(scholar_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Extract PDF URLs dan metadata dari data Semantic Scholar."""
     results = []
-    detailed = obj.get("detailed_results") or obj.get("data") or []
-    for det in detailed:
-        pid = det.get("paperId") or det.get("paper_id") or det.get("paperId")
-        title = det.get("title") or ""
-        doi = det.get("doi") or (det.get("externalIds") or {}).get("DOI")
+    
+    # Handle different response formats
+    detailed_results = (
+        scholar_data.get("detailed_results") or 
+        scholar_data.get("data") or 
+        []
+    )
+    
+    for paper in detailed_results:
+        paper_id = (
+            paper.get("paperId") or 
+            paper.get("paper_id") or 
+            paper.get("id")
+        )
+        title = paper.get("title") or ""
+        doi = paper.get("doi") or (paper.get("externalIds") or {}).get("DOI")
+        
+        # Look for PDF URL in different fields
         pdf_url = None
-        open_pdf = det.get("openAccessPdf") or {}
+        
+        # Check openAccessPdf field
+        open_pdf = paper.get("openAccessPdf") or {}
         if isinstance(open_pdf, dict):
             pdf_url = open_pdf.get("url")
+        
+        # Check other PDF fields
         if not pdf_url:
-            pdf_url = det.get("pdfUrl") or det.get("pdf_url")
+            pdf_url = paper.get("pdfUrl") or paper.get("pdf_url")
+        
+        # Check main URL if it's a PDF
         if not pdf_url:
-            url = det.get("url")
+            url = paper.get("url")
             if url and url.lower().endswith(".pdf"):
                 pdf_url = url
+        
         if pdf_url:
-            identifier = pid or (doi.replace("/", "_") if doi else re.sub(r"\W+", "_", title)[:50] or "s2_doc")
+            # Generate safe identifier
+            identifier = (
+                paper_id or 
+                (doi.replace("/", "_") if doi else None) or
+                re.sub(r"\W+", "_", title)[:50] or 
+                "s2_doc"
+            )
+            
             results.append({
                 "id": identifier,
                 "pdf_url": pdf_url,
@@ -105,106 +160,169 @@ def extract_pdf_from_semantic_scholar(obj):
                 "doi": doi,
                 "source": "semantic_scholar"
             })
+    
     return results
 
-def build_api_items_from_raw():
-    """Bangun daftar api_items dari file raw di data/raw"""
+
+def build_api_items_from_raw_files() -> List[Dict[str, Any]]:
+    """Build daftar API items dari semua file raw yang tersedia."""
     api_items = []
-    for p in RAW_DIR.glob("crossref_*.json"):
+    
+    # Process CrossRef files
+    for crossref_file in RAW_DIR.glob("crossref_*.json"):
         try:
-            obj = json.loads(p.read_text(encoding="utf-8"))
-            api_items.extend(extract_pdf_urls_from_crossref(obj))
+            data = json.loads(crossref_file.read_text(encoding="utf-8"))
+            api_items.extend(extract_pdf_urls_from_crossref(data))
         except Exception as e:
-            print(f"[warn] gagal parse {p.name}: {e}")
-    for p in RAW_DIR.glob("semantic_scholar_*.json"):
+            print(f"[warn] Failed to parse {crossref_file.name}: {e}")
+    
+    # Process Semantic Scholar files
+    for scholar_file in RAW_DIR.glob("semantic_scholar_*.json"):
         try:
-            obj = json.loads(p.read_text(encoding="utf-8"))
-            api_items.extend(extract_pdf_from_semantic_scholar(obj))
+            data = json.loads(scholar_file.read_text(encoding="utf-8"))
+            api_items.extend(extract_pdf_urls_from_semantic_scholar(data))
         except Exception as e:
-            print(f"[warn] gagal parse {p.name}: {e}")
+            print(f"[warn] Failed to parse {scholar_file.name}: {e}")
+    
     return api_items
 
-def deduplicate_items(items):
-    """Hapus duplikat berdasarkan pdf_url"""
-    seen = set()
-    out = []
-    for it in items:
-        url = it.get("pdf_url")
-        if not url or url in seen:
-            continue
-        seen.add(url)
-        out.append(it)
-    return out
 
-def clean_api_items(api_items):
-    """Buang URL yang tidak valid, IP privat, atau yang sudah error di log sebelumnya"""
-    cleaned = []
-    seen_error = set()
+def deduplicate_api_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Remove duplicate items berdasarkan PDF URL."""
+    seen_urls: Set[str] = set()
+    unique_items = []
+    
+    for item in items:
+        pdf_url = item.get("pdf_url")
+        if not pdf_url or pdf_url in seen_urls:
+            continue
+        
+        seen_urls.add(pdf_url)
+        unique_items.append(item)
+    
+    return unique_items
+
+
+def get_previously_failed_urls() -> Set[str]:
+    """Get set of URLs yang pernah gagal dari error log sebelumnya."""
+    failed_urls: Set[str] = set()
+    
     if ERROR_LOG_PATH.exists():
-        with open(ERROR_LOG_PATH, "r", encoding="utf-8") as f:
-            next(f)  # skip header
-            for line in f:
-                parts = line.strip().split(",")
-                if len(parts) >= 2:
-                    seen_error.add(parts[1])
+        try:
+            with open(ERROR_LOG_PATH, "r", encoding="utf-8") as f:
+                reader = csv.reader(f)
+                next(reader, None)  # Skip header
+                
+                for row in reader:
+                    if len(row) >= 2:
+                        failed_urls.add(row[1])
+        except Exception as e:
+            print(f"Warning: Could not read error log: {e}")
+    
+    return failed_urls
+
+
+def clean_and_filter_items(api_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Filter dan bersihkan API items dari URL tidak valid atau berbahaya."""
+    cleaned_items = []
+    failed_urls = get_previously_failed_urls()
+    
     for item in api_items:
-        url = item.get("pdf_url")
-        if not url:
+        pdf_url = item.get("pdf_url")
+        if not pdf_url:
             continue
-        if url in seen_error:
-            print(f"[skip] URL sudah pernah gagal sebelumnya: {url}")
+        
+        # Skip URLs yang pernah gagal
+        if pdf_url in failed_urls:
+            print(f"[skip] URL sudah pernah gagal sebelumnya: {pdf_url}")
             continue
-        if is_private_ip(url):
-            print(f"[skip] URL mengarah ke IP privat: {url}")
-            log_error(url, "private/local IP skipped")
+        
+        # Skip private/local IP addresses untuk keamanan
+        if is_private_ip_address(pdf_url):
+            print(f"[skip] URL mengarah ke IP privat: {pdf_url}")
+            log_error(pdf_url, "private/local IP skipped")
             continue
-        cleaned.append(item)
-    return cleaned
+        
+        cleaned_items.append(item)
+    
+    return cleaned_items
 
-# === MAIN PIPELINE ===
-def main(dry_run=False):
-    print("[1/4] Membaca file mentah dari data/raw ...")
-    api_items = build_api_items_from_raw()
-    print(f"    -> Ditemukan {len(api_items)} kandidat URL PDF")
 
-    api_items = deduplicate_items(api_items)
-    print(f"    -> {len(api_items)} URL unik setelah deduplikasi")
-
-    api_items = clean_api_items(api_items)
-    print(f"    -> {len(api_items)} URL valid setelah dibersihkan dari IP lokal & error sebelumnya")
-
-    if dry_run:
-        for i, it in enumerate(api_items[:20], 1):
-            print(f" {i}. {it['pdf_url']}")
-        return api_items
-
-    if not api_items:
-        print("❌ Tidak ada URL yang valid untuk diproses.")
-        return []
-
-    print("\n[2/4] Menjalankan loader untuk download + ekstraksi teks ...")
+def process_documents_safely(api_items: List[Dict[str, Any]]) -> List[str]:
+    """Process documents satu per satu dengan error handling yang aman."""
     saved_files = []
+    
     for item in tqdm(api_items, desc="Processing documents"):
         url = item["pdf_url"]
         try:
-            result = run_loader([item])  # kirim satu per satu agar error tidak memblokir semuanya
+            # Process single item to avoid blocking all processing on one error
+            result = run_loader([item])
             if result:
                 log_success(url, str(result[0]))
                 saved_files.extend(result)
         except Exception as e:
-            print(f"[error] Gagal memproses {url}: {e}")
+            print(f"[error] Failed to process {url}: {e}")
             log_error(url, str(e))
+    
+    return saved_files
 
-    print(f"\n[3/4] Loader selesai. {len(saved_files)} file berhasil diekstrak.")
+
+def save_cleaned_items(api_items: List[Dict[str, Any]]):
+    """Simpan daftar API items yang sudah dibersihkan ke file JSON."""
     with open(CLEANED_ITEMS_PATH, "w", encoding="utf-8") as f:
         json.dump(api_items, f, ensure_ascii=False, indent=2)
-    print(f"[4/4] Daftar URL yang valid disimpan di {CLEANED_ITEMS_PATH}")
 
-    print("\n✅ Pipeline selesai tanpa error fatal.\nHasil ekstraksi: data/raw_pdf/\nLog: data/metadata/loader_errors.csv dan loader_success.csv")
+
+def main(dry_run: bool = False):
+    """Main pipeline untuk prepare dan run loader dengan error handling yang baik."""
+    
+    print("[1/4] Reading raw files from data/raw ...")
+    api_items = build_api_items_from_raw_files()
+    print(f"    -> Found {len(api_items)} PDF URL candidates")
+
+    print("[2/4] Cleaning and deduplicating items ...")
+    api_items = deduplicate_api_items(api_items)
+    print(f"    -> {len(api_items)} unique URLs after deduplication")
+
+    api_items = clean_and_filter_items(api_items)
+    print(f"    -> {len(api_items)} valid URLs after filtering")
+
+    if dry_run:
+        print("\n=== DRY RUN: Top 20 URLs ===")
+        for i, item in enumerate(api_items[:20], 1):
+            print(f" {i:2d}. {item['pdf_url']}")
+            print(f"     Title: {item.get('title', 'No title')[:80]}...")
+        return api_items
+
+    if not api_items:
+        print("❌ No valid URLs to process.")
+        return []
+
+    print("\n[3/4] Running loader for download + text extraction ...")
+    saved_files = process_documents_safely(api_items)
+
+    print(f"\n[4/4] Loader completed. {len(saved_files)} files successfully extracted.")
+    save_cleaned_items(api_items)
+    print(f"Valid URL list saved to {CLEANED_ITEMS_PATH}")
+
+    print(f"\n✅ Pipeline completed without fatal errors.")
+    print(f"Extracted results: data/raw_pdf/")
+    print(f"Logs: {ERROR_LOG_PATH} and {SUCCESS_LOG_PATH}")
+
+    return saved_files
+
+
+def create_argument_parser():
+    """Create command line argument parser."""
+    parser = argparse.ArgumentParser(
+        description="Prepare api_items, clean invalid URLs, and run loader safely."
+    )
+    parser.add_argument("--dry-run", action="store_true", 
+                       help="Show URL list without downloading")
+    return parser
+
 
 if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser(description="Prepare api_items, clean invalid URLs, and run loader safely.")
-    parser.add_argument("--dry-run", action="store_true", help="Lihat daftar URL tanpa mendownload.")
+    parser = create_argument_parser()
     args = parser.parse_args()
     main(dry_run=args.dry_run)

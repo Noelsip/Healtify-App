@@ -946,3 +946,17 @@ timestamp,source,query,file,status,notes
 2025-10-10T19:24:02.827417+00:00,semantic_scholar,profit bitcoin membuat sehat,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
 "
 2025-10-10T19:24:03.030950+00:00,semantic_scholar,profit bitcoin membuat sehat,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\semantic_scholar_profit_bitcoin_membuat_sehat_1760124243.json,success,"search_returned:30, details_returned:0"
+2025-10-11T06:52:00.834677+00:00,pubmed,kekurangan minum membuatkan gagal ginjal,,no results,No articles found for the given query.
+2025-10-11T06:52:02.537125+00:00,crossref,kekurangan minum membuatkan gagal ginjal,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_kekurangan_minum_membuatkan_gagal_ginjal_1760165522.json,success,30 articles retrieved.
+2025-10-11T06:52:04.310789+00:00,semantic_scholar,kekurangan minum membuatkan gagal ginjal,,detail_error_400,"{""error"":""Unrecognized or unsupported fields: [doi]""}
+"
+2025-10-11T06:52:04.513980+00:00,semantic_scholar,kekurangan minum membuatkan gagal ginjal,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\semantic_scholar_kekurangan_minum_membuatkan_gagal_ginjal_1760165524.json,success,"search_returned:1, details_returned:0"
+2025-10-11T07:12:07.106285+00:00,pubmed,susu mengandung zat besi,,no results,No articles found for the given query.
+2025-10-11T07:12:08.935577+00:00,crossref,susu mengandung zat besi,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_susu_mengandung_zat_besi_1760166728.json,success,30 articles retrieved.
+2025-10-11T07:12:43.143796+00:00,semantic_scholar,susu mengandung zat besi,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\semantic_scholar_susu_mengandung_zat_besi_1760166763.json,success,"search_returned:30, details_returned:0"
+2025-10-11T07:41:03.711844+00:00,pubmed,minum alkohor dapat membuat darah lebih bersih,,no results,No articles found for the given query.
+2025-10-11T07:41:05.747836+00:00,crossref,minum alkohor dapat membuat darah lebih bersih,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_minum_alkohor_dapat_membuat_darah_lebih_bersih_1760168465.json,success,30 articles retrieved.
+2025-10-11T07:41:55.382391+00:00,semantic_scholar,minum alkohor dapat membuat darah lebih bersih,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\semantic_scholar_minum_alkohor_dapat_membuat_darah_lebih_bersih_1760168515.json,success,"search_returned:30, details_returned:0"
+2025-10-11T07:56:49.811771+00:00,pubmed,kebanyakan masturbasi membuat mandul,,no results,No articles found for the given query.
+2025-10-11T07:56:51.418337+00:00,crossref,kebanyakan masturbasi membuat mandul,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_kebanyakan_masturbasi_membuat_mandul_1760169411.json,success,30 articles retrieved.
+2025-10-11T07:56:54.668304+00:00,semantic_scholar,kebanyakan masturbasi membuat mandul,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\semantic_scholar_kebanyakan_masturbasi_membuat_mandul_1760169414.json,success,"search_returned:3, details_returned:0"

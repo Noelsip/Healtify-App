@@ -1,25 +1,28 @@
 import os
 import json
-import psycopg2
-import sys
 import logging
-from typing import Iterable, Tuple, Optional
+import sys
 from pathlib import Path
+from typing import Iterable, Tuple, Optional
+
+import psycopg2
 from dotenv import load_dotenv
 from psycopg2.extras import execute_values
 from pgvector.psycopg2 import register_vector
 from tqdm import tqdm
 
+# Configuration
 BASE = Path(__file__).parents[1]
 DOTENV_PATH = BASE / ".env"
 
+# Load environment variables
 load_ok = load_dotenv(dotenv_path=DOTENV_PATH)
 if load_ok:
     print(f"Loaded environment variables from {DOTENV_PATH}")
 else:
-    print(f"No .env file found at {DOTENV_PATH} — relying on OS environment variables (if any)")
+    print(f"No .env file found at {DOTENV_PATH} — using OS environment variables")
 
-# konfigurasi koneksi database
+# Database configuration
 DB_HOST = os.getenv("DB_HOST")
 DB_PORT = os.getenv("DB_PORT")
 DB_NAME = os.getenv("DB_NAME")
@@ -27,18 +30,19 @@ DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 DB_TABLE = "embeddings"
 
-CHUNKS_DIR = Path(os.getenv("CHUNKS_DIR",Path(__file__).parents[1] / "data" / "chunks"))
+# Chunks directory
+CHUNKS_DIR = Path(os.getenv("CHUNKS_DIR", BASE / "data" / "chunks"))
+if not CHUNKS_DIR.exists():
+    CHUNKS_DIR.mkdir(parents=True, exist_ok=True)
 
-if not os.path.exists(CHUNKS_DIR):
-    os.makedirs(CHUNKS_DIR)
 print(f"Using chunks directory: {CHUNKS_DIR}")
 
-# mendeteksi vector dim dari embedding pada file pertama
+# Configuration constants
 VECTOR_DIM_ENV = os.getenv("VECTOR_DIM")
 VECTOR_DIM = int(VECTOR_DIM_ENV) if VECTOR_DIM_ENV else None
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", 500))
 
-# logging setup untuk progess, warning, error
+# Logging setup
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -46,22 +50,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# membuat koneksi ke database PostgreSQL
+
 def connect_db():
-    connect = psycopg2.connect(
+    """Buat koneksi ke database PostgreSQL dengan pgvector support."""
+    connection = psycopg2.connect(
         host=DB_HOST,
         port=DB_PORT,
         dbname=DB_NAME,
         user=DB_USER,
         password=DB_PASSWORD
     )
+    register_vector(connection)
+    return connection
 
-    register_vector(connect)
-    return connect
 
-# membuat tabel jika belum ada
-def ensure_table(connect, vector_dim):
-    with connect.cursor() as cursor:
+def ensure_table(connection, vector_dim: int):
+    """Buat tabel embeddings jika belum ada."""
+    with connection.cursor() as cursor:
         cursor.execute(f"""
             CREATE TABLE IF NOT EXISTS {DB_TABLE} (
                 id bigserial PRIMARY KEY,
@@ -76,162 +81,190 @@ def ensure_table(connect, vector_dim):
                 created_at TIMESTAMPTZ DEFAULT NOW()
             );
         """)
-        connect.commit()
+        connection.commit()
 
-# generator untuk membaca file JSONL per baris
-def iter_jsonl(path: Path) -> Iterable[dict]:
-    with path.open("r", encoding="utf-8") as fh:
-        for raw in fh:
-            raw = raw.strip()
 
-            if not raw:
+def iter_jsonl_records(file_path: Path) -> Iterable[dict]:
+    """Generator untuk membaca file JSONL baris per baris."""
+    with file_path.open("r", encoding="utf-8") as fh:
+        for line_num, raw_line in enumerate(fh, 1):
+            raw_line = raw_line.strip()
+            if not raw_line:
                 continue
+            
             try:
-                yield json.loads(raw)
+                yield json.loads(raw_line)
             except json.JSONDecodeError as e:
-                logger.warning(f"Gagal decode JSON di {path.name}: {e}, raw: {raw[:200]}...")
+                logger.warning(f"Failed to decode JSON at {file_path.name}:{line_num}: {e}")
 
 
-# mendeteksi vector dim via env dari embedding pertama valid
-def detect_vector_dim_from_files(files: Iterable[Path]) -> Optional[int]:
-    for file in files:
-        for record in iter_jsonl(file):
+def detect_vector_dimension(files: Iterable[Path]) -> Optional[int]:
+    """Deteksi dimensi vektor dari embedding pertama yang valid."""
+    for file_path in files:
+        for record in iter_jsonl_records(file_path):
             embedding = record.get("embedding")
             if embedding and isinstance(embedding, list):
                 return len(embedding)
     return None
 
-# standarisasi tuple data untuk insert
-def prepare_tuple_from_record(rec: dict) -> Tuple:
-    emb = rec.get("embedding")
-    emb_str = None
-    if emb is not None:
-        if not isinstance(emb, list):
-            # jika bukan list, log dan skip nanti
-            logger.warning("Embedding bukan list: %r", emb)
-        else:
-            # pastikan semua elemen numeric (float/int)
-            try:
-                emb_str = "[" + ",".join(str(float(x)) for x in emb) + "]"
-            except Exception as e:
-                logger.warning("Gagal konversi embedding ke float list: %s ; emb=%r", e, emb)
-                emb_str = None
 
+def prepare_record_tuple(record: dict) -> Tuple:
+    """Konversi record menjadi tuple untuk database insert."""
+    embedding = record.get("embedding")
+    embedding_str = _convert_embedding_to_string(embedding)
+    
     return (
-        rec.get("doc_id"),
-        rec.get("safe_id"),
-        rec.get("source_file"),
-        rec.get("chunk_index"),
-        rec.get("n_words"),
-        rec.get("text"),
-        rec.get("doi"),
-        emb_str,
+        record.get("doc_id"),
+        record.get("safe_id"),
+        record.get("source_file"),
+        record.get("chunk_index"),
+        record.get("n_words"),
+        record.get("text"),
+        record.get("doi"),
+        embedding_str,
     )
 
 
-# fungsi utama untuk membaca file dan memasukkan data ke database
+def _convert_embedding_to_string(embedding) -> Optional[str]:
+    """Konversi embedding menjadi string format PostgreSQL vector."""
+    if embedding is None:
+        return None
+    
+    if not isinstance(embedding, list):
+        logger.warning("Embedding bukan list: %r", embedding)
+        return None
+    
+    try:
+        return "[" + ",".join(str(float(x)) for x in embedding) + "]"
+    except Exception as e:
+        logger.warning("Gagal konversi embedding ke float list: %s", e)
+        return None
+
+
+def validate_record(record: dict, expected_vector_dim: int, file_name: str) -> bool:
+    """Validasi record sebelum insert ke database."""
+    embedding = record.get("embedding")
+    
+    if not embedding:
+        logger.warning(f"Skip record tanpa embedding di {file_name}")
+        return False
+    
+    if not isinstance(embedding, list):
+        logger.warning(f"Embedding bukan list (file {file_name} chunk {record.get('chunk_index')})")
+        return False
+    
+    if len(embedding) != expected_vector_dim:
+        logger.warning(
+            f"Skip chunk karena dimensi tidak cocok (file {file_name} chunk {record.get('chunk_index')} "
+            f"len={len(embedding)}): expected {expected_vector_dim}"
+        )
+        return False
+    
+    return True
+
+
+def insert_batch_to_db(cursor, batch_data: list) -> int:
+    """Insert batch data ke database."""
+    if not batch_data:
+        return 0
+    
+    sql = f"INSERT INTO {DB_TABLE} (doc_id, safe_id, source_file, chunk_index, n_words, text, doi, embedding) VALUES %s"
+    template = "(%s,%s,%s,%s,%s,%s,%s,%s::vector)"
+    
+    execute_values(cursor, sql, batch_data, template=template, page_size=100)
+    return len(batch_data)
+
+
+def process_file(file_path: Path, cursor, vector_dim: int) -> int:
+    """Proses satu file JSONL dan insert ke database."""
+    logger.info(f"Memproses file: {file_path.name}")
+    
+    batch_data = []
+    total_inserted = 0
+    
+    for record in tqdm(iter_jsonl_records(file_path), desc=f"Processing {file_path.name}", unit="rec"):
+        if not validate_record(record, vector_dim, file_path.name):
+            continue
+        
+        batch_data.append(prepare_record_tuple(record))
+        
+        # Insert batch ketika mencapai BATCH_SIZE
+        if len(batch_data) >= BATCH_SIZE:
+            inserted_count = insert_batch_to_db(cursor, batch_data)
+            total_inserted += inserted_count
+            logger.info(f"Inserted batch of {inserted_count} records. Total: {total_inserted}")
+            batch_data = []
+    
+    # Insert sisa data di akhir file
+    if batch_data:
+        inserted_count = insert_batch_to_db(cursor, batch_data)
+        total_inserted += inserted_count
+        logger.info(f"Inserted final batch of {inserted_count} records from {file_path.name}")
+    
+    return total_inserted
+
+
 def ingest():
-    # menemukan file .jsonl
+    """Fungsi utama untuk ingest chunks ke PostgreSQL database."""
+    # Validasi direktori dan file
     if not CHUNKS_DIR.exists() or not CHUNKS_DIR.is_dir():
         logger.error(f"Direktori chunks tidak ditemukan: {CHUNKS_DIR}")
         sys.exit(1)
 
-    files = sorted(list(CHUNKS_DIR.glob("*.jsonl")))
-    if not files:
+    jsonl_files = sorted(list(CHUNKS_DIR.glob("*.jsonl")))
+    if not jsonl_files:
         logger.error(f"Tidak ada file .jsonl ditemukan di {CHUNKS_DIR}")
         sys.exit(1)
 
-    logger.info(f"Ditemukan {len(files)} file .jsonl di {len(files)} {CHUNKS_DIR}")
+    logger.info(f"Ditemukan {len(jsonl_files)} file .jsonl di {CHUNKS_DIR}")
 
-    # menentukan dimensi vektor
+    # Tentukan dimensi vektor
+    vector_dim = _determine_vector_dimension(jsonl_files)
+    
+    # Setup database
+    try:
+        connection = connect_db()
+        ensure_table(connection, vector_dim)
+    except Exception as e:
+        logger.error(f"Gagal setup database: {e}")
+        sys.exit(1)
+
+    # Proses files dan insert data
+    total_inserted = 0
+    try:
+        with connection.cursor() as cursor:
+            for file_path in jsonl_files:
+                inserted_count = process_file(file_path, cursor, vector_dim)
+                connection.commit()
+                total_inserted += inserted_count
+
+    except KeyboardInterrupt:
+        logger.warning("Proses dihentikan oleh user. Data yang sudah diproses tetap tersimpan.")
+    except Exception as e:
+        logger.error(f"Error during processing: {e}")
+    finally:
+        connection.close()
+
+    logger.info(f"Proses selesai. Total records inserted: {total_inserted}")
+
+
+def _determine_vector_dimension(files: list) -> int:
+    """Tentukan dimensi vektor dari environment variable atau deteksi otomatis."""
     vector_dim = VECTOR_DIM
+    
     if vector_dim is None:
         logger.info("Mendeteksi dimensi vektor dari file...")
-        vector_dim = detect_vector_dim_from_files(files)
+        vector_dim = detect_vector_dimension(files)
+        
         if vector_dim is None:
-            logger.error("Gagal mendeteksi dimensi vektor dari file. Pastikan ada embedding valid.")
+            logger.error("Gagal mendeteksi dimensi vektor. Pastikan ada embedding valid.")
             sys.exit(1)
+        
         logger.info(f"Terdeteksi dimensi vektor: {vector_dim}")
     else:
         logger.info(f"Menggunakan dimensi vektor dari env: {vector_dim}")
-
-    # mengoneksikan db dan buat table jika perlu
-    try:
-        connect = connect_db()
-    except Exception as e:
-        logger.error(f"Gagal koneksi ke database: {e}")
-        sys.exit(1)
-
-    try:
-        ensure_table(connect, vector_dim)
-    except Exception as e:
-        logger.error(f"Gagal memastikan tabel di database: {e}")
-        connect.close()
-        sys.exit(1)
-
-    # melakukan iterasi file dan insert data
-    total_inserted = 0
-    try:
-        with connect.cursor() as cursor:
-            for file in files:
-                logger.info(f"Memproses file: {file.name}")
-                to_insert = []
-
-                for record in tqdm(iter_jsonl(file), desc=f"Memproses {file.name}", unit="rec"):
-                    emb = record.get("embedding")
-
-                    if not emb:
-                        logger.warning(f"skip record tanpa embedding di {file.name}: {record}")
-                        continue
-                    if not isinstance(emb, list) :
-                        logger.warning("Embedding bukan list (file %s chunk %s). Skip.", file.name, record.get("chunk_index"))
-                        continue
-                    if len(emb) != vector_dim:
-                        logger.warning(
-                            "Skip chunk karena dimensi tidak cocok (file %s chunk %s len=%d): expected %d",
-                            file.name,
-                            record.get("chunk_index"),
-                            len(emb),
-                            vector_dim
-                        )
-                        continue
-                    
-                    to_insert.append(prepare_tuple_from_record(record))
-
-                    if len(to_insert) >= BATCH_SIZE:
-                        sql = f"INSERT INTO {DB_TABLE} (doc_id, safe_id, source_file, chunk_index, n_words, text, doi, embedding) VALUES %s"
-                        template = "(%s,%s,%s,%s,%s,%s,%s,%s::vector)"
-
-                        logger.debug("Contoh tuple sebelum insert: %r", to_insert[0] if to_insert else None)
-                        execute_values(cursor, sql, to_insert, template=template, page_size=100)
-                        connect.commit()
-                        total_inserted += len(to_insert)
-                        logger.info(f"Inserted batch of {len(to_insert)} records. Total inserted: {total_inserted}")
-                        to_insert = []
-
-                
-                # insert sisa data di akhir file
-                if to_insert:
-                    sql = f"INSERT INTO {DB_TABLE} (doc_id, safe_id, source_file, chunk_index, n_words, text, doi, embedding) VALUES %s"
-                    template = "(%s,%s,%s,%s,%s,%s,%s,%s::vector)"
-
-                    logger.debug("Contoh tuple final sebelum insert: %r", to_insert[0])
-                    execute_values(cursor, sql, to_insert, template=template, page_size=100)
-                    connect.commit()
-                    total_inserted += len(to_insert)
-                    logger.info(f"Inserted final batch of {len(to_insert)} records from {file.name}. Total inserted: {total_inserted}")
-
-
-                logger.info(f"Selesai. Total records inserted: {total_inserted}")
-
-    except KeyboardInterrupt:
-        logger.warning("Proses dihentikan oleh user. data tetap tersimpan.")
-    except Exception as e:
-        logger.error(f"Error selama proses insert: {e}")
-    finally:
-        connect.close()
-
-    logger.info(f"Proses selesai. Total records inserted: {total_inserted}")
+    
+    return vector_dim
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ import argparse
 import sys
 import traceback
 from typing import List, Dict, Any, Optional
+from functools import lru_cache
 
 # library ketiga
 from dotenv import load_dotenv
@@ -25,13 +26,25 @@ from ingest_chunks_to_pg import connect_db, DB_TABLE
 from chunk_and_embed import embed_texts_gemini
 from fetch_sources import fetch_all_sources
 
-# --- Setup environment & client ---
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.dirname(SCRIPT_DIR)
+BASE = pathlib.Path(__file__).parent     
+TRAINING_DIR = BASE.parent          
+PROJECT_ROOT = TRAINING_DIR.parent       
+
+# Pastikan folder data/chunks exists
+DATA_DIR = TRAINING_DIR / "data"
+CHUNKS_DIR = DATA_DIR / "chunks"
+
+# helper untuk menyimpan hasil verifikasi
+VERIFICATION_RESULTS_PATH = TRAINING_DIR / "data" / "metadata" / "verification_results.jsonl"
+VERIFICATION_RESULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+# --- Pengaturan environment & client ---
+SCRIPT_DIR = str(BASE)
+REPO_ROOT = str(PROJECT_ROOT)
 sys.path.insert(0, SCRIPT_DIR)
 sys.path.insert(0, REPO_ROOT)
 
-load_dotenv(dotenv_path=os.path.join(REPO_ROOT, ".env"))
+load_dotenv(dotenv_path=PROJECT_ROOT / ".env") 
 
 try:
     client = getattr(cae, "client", None)
@@ -44,28 +57,39 @@ if client is None:
         raise RuntimeError("GEMINI_API_KEY tidak ditemukan di environment variables atau .env file.")
     client = genai.Client(api_key=GEMINI_API_KEY)
 
-# Quick DB sanity check
+# Pemeriksaan koneksi database
 try:
     conn = connect_db()
     with conn.cursor() as cur:
         cur.execute(f"SELECT count(*) FROM {DB_TABLE};")
         cnt = cur.fetchone()
-        print(f"[DB] rows in embeddings table: {cnt}")
+        print(f"[DB] baris dalam tabel embeddings: {cnt}")
     conn.close()
 except Exception as e:
-    print(f"[DB] Warning: tidak dapat melakukan pengecekan awal ke DB: {str(e)}")
+    print(f"[DB] Peringatan: tidak dapat melakukan pengecekan awal ke DB: {str(e)}")
 
-# Constants
+# Konstanta konfigurasi
 PROMPT_HEADER = """
 Anda adalah sistem verifikasi fakta medis yang teliti. Tugas Anda:
-1) Evaluasi relevansi bukti terhadap klaim.
-2) Jika ada bukti yang mendukung atau menolak klaim, jelaskan dasar keputusan.
-3) Output harus JSON dengan fields: claim, analysis, label (VALID/HOAX), confidence (0-1), evidence (list), summary.
+1) Nilai apakah klaim ini benar, salah, atau sebagian benar tergantung konteks medis.
+2) Jika klaim sebagian benar, jelaskan kondisi atau batasan di mana klaim tersebut bisa benar.
+3) Output JSON dengan fields: claim, analysis, label (VALID/HOAX/PARTIALLY_VALID), confidence (0-1), evidence (list), summary.
 """
 
 LLM_CONF_THRESHOLD = 0.50
 COMBINED_CONF_THRESHOLD = 0.50
 
+# Konfigurasi untuk ekspansi pola relevansi berbasis LLM
+_EXPANSION_CACHE: Dict[str, Dict[str, Any]] = {}
+EXPANSION_CACHE_TTL = 60 * 60  # 1 jam TTL
+EXPANSION_MAX_TERMS = 12
+EXPANSION_MIN_TERMS = 3
+EXPANSION_MODEL = "gemini-2.5-flash-lite"
+EXPANSION_TIMEOUT = 6.0
+
+# -----------------------
+# Fungsi utilitas umum
+# -----------------------
 
 def extract_text_from_model_resp(resp) -> str:
     """Ekstrak teks dari berbagai format respons Gemini API."""
@@ -104,9 +128,8 @@ def extract_text_from_model_resp(resp) -> str:
         except Exception:
             return ""
 
-
 def safe_strip(s) -> str:
-    """Safely strip dan konversi ke string."""
+    """Konversi ke string dan strip dengan aman."""
     try:
         if s is None:
             return ""
@@ -114,98 +137,168 @@ def safe_strip(s) -> str:
     except Exception:
         return ""
 
+# -----------------------
+# Ekspansi pola berbasis LLM
+# -----------------------
 
-def translate_text_gemini(text: str, target_lang: str = "English") -> str:
-    """Terjemahkan teks menggunakan Gemini API."""
+def _claim_cache_key(claim: str) -> str:
+    """Buat kunci cache unik untuk klaim."""
+    return str(abs(hash(claim)))[:20]
+
+def _safe_parse_json_array(text: str) -> List[str]:
+    """Parser JSON array yang toleran: jika LLM mengembalikan plaintext, coba parsing per baris."""
+    text = text.strip()
     if not text:
-        return ""
+        return []
     
-    prompt = (
-        f"Translate the following text to {target_lang}. "
-        f"Keep it concise and preserve medical terminology when possible.\n\n"
-        f"Text:\n\"\"\"\n{text}\n\"\"\"\n\nOutput only the translated text."
-    )
-    
+    # Coba parsing JSON dulu
     try:
-        resp = client.models.generate_content(
-            model="gemini-2.5-flash-lite",
-            contents=prompt,
-            config={"temperature": 0.0, "max_output_tokens": 256}
-        )
-        txt = extract_text_from_model_resp(resp)
-        txt = safe_strip(txt).replace("```", "")
-        return txt or text
-    except Exception as e:
-        print(f"[TRANSLATE] failed: {e}")
-        return text
+        parsed = json.loads(text)
+        if isinstance(parsed, list):
+            return [safe_strip(p) for p in parsed if isinstance(p, str)]
+    except Exception:
+        pass
 
-
-def generate_bilingual_queries(claim: str, langs: List[str] = ["English"]) -> List[str]:
-    """Generate query variations dalam multiple bahasa dan sinonim."""
-    queries = []
-    claim_clean = safe_strip(claim)
-    
-    if claim_clean:
-        queries.append(claim_clean)
-
-    # Add translations
-    for lang in langs:
+    # Coba ekstrak array dalam kurung siku dari teks
+    m = re.search(r'\[.*\]', text, flags=re.S)
+    if m:
         try:
-            translated = translate_text_gemini(claim_clean, target_lang=lang)
-            translated = safe_strip(translated)
-            if translated and translated not in queries:
-                queries.append(translated)
+            parsed = json.loads(m.group(0))
+            if isinstance(parsed, list):
+                return [safe_strip(p) for p in parsed if isinstance(p, str)]
         except Exception:
             pass
 
-    # Ask LLM for variations
-    english_example = queries[1] if len(queries) > 1 else claim_clean
-    syn_prompt = (
-        f"You are a medical search query assistant.\n"
-        f"Given the topic below, produce 3-5 short, focused search query variations "
-        f"or keyword phrases researchers would use.\n"
-        f"Return a JSON array of strings.\n\n"
-        f"Topic (original): {claim_clean}\n"
-        f"Topic (english translation): {english_example}"
+    # Fallback: pisah berdasarkan baris dan koma
+    candidates = []
+    for part in re.split(r'[\n\r,;]+', text):
+        part = part.strip().lstrip("-•* ").strip()
+        if part:
+            candidates.append(part)
+    return candidates
+
+def expand_relevance_patterns(claim: str, force_refresh: bool = False) -> List[str]:
+    """
+    Gunakan LLM (Gemini) untuk menghasilkan kata kunci/istilah relevan untuk klaim.
+    Mengembalikan list kata/phrase dalam lowercase dengan caching untuk efisiensi.
+    """
+    claim_key = _claim_cache_key(claim)
+    now = int(time.time())
+
+    # Kembalikan cache jika masih fresh
+    cached = _EXPANSION_CACHE.get(claim_key)
+    if cached and not force_refresh:
+        if (now - cached.get("ts", 0)) < EXPANSION_CACHE_TTL:
+            return cached.get("patterns", [])
+
+    # Buat prompt untuk ekspansi pola yang lebih medis dan kontekstual
+    prompt = (
+        f"Anda adalah research assistant medis. Berikan array JSON berisi {EXPANSION_MAX_TERMS} "
+        f"istilah pencarian akademik yang spesifik dan relevan untuk meneliti klaim medis ini secara mendalam.\n\n"
+        f"Klaim: \"{claim}\"\n\n"
+        f"Persyaratan:\n"
+        f"- Sertakan istilah medis/dermatologi yang tepat (contoh: 'facial steaming', 'skin hydration', 'pore dilation')\n"
+        f"- Tambahkan mekanisme biologis (contoh: 'vasodilation', 'sebum production', 'collagen synthesis')\n"
+        f"- Sertakan konteks klinis (contoh: 'dermatology study', 'skin care efficacy', 'cosmetic dermatology')\n"
+        f"- Gunakan variasi bahasa Inggris dan Indonesia untuk coverage maksimal\n"
+        f"- Fokus pada aspek yang bisa dibuktikan secara ilmiah\n\n"
+        f"Format: [\"term1\", \"term2\", \"term3\", ...]\n"
+        f"Contoh untuk klaim uap: [\"facial steaming\", \"steam therapy skin\", \"terapi uap wajah\", \"skin hydration mechanism\", \"pore cleansing\", \"dermatology steam\"]"
     )
-    
+
     try:
         resp = client.models.generate_content(
-            model="gemini-2.5-flash-lite",
-            contents=syn_prompt,
-            config={"temperature": 0.2, "max_output_tokens": 300}
+            model=EXPANSION_MODEL,
+            contents=prompt,
+            config={"temperature": 0.3, "max_output_tokens": 2000}
         )
         txt = extract_text_from_model_resp(resp)
         txt = safe_strip(txt)
+        patterns = _safe_parse_json_array(txt)
         
-        variations = []
-        try:
-            if txt:
-                variations = json.loads(txt)
-        except Exception:
-            # Tolerant fallback: split lines and strip bullets
-            for line in (txt or "").splitlines():
-                line = line.strip().lstrip("-• ").strip()
-                if line:
-                    variations.append(line)
-        
-        for query in variations:
-            query_str = safe_strip(query)
-            if query_str and query_str not in queries:
-                queries.append(query_str)
-                
+        # Normalisasi dan filter
+        patterns_norm = []
+        for p in patterns:
+            p2 = re.sub(r'\s+', ' ', p).strip().lower()
+            if p2 and p2 not in patterns_norm and len(p2) > 2:
+                patterns_norm.append(p2)
+            if len(patterns_norm) >= EXPANSION_MAX_TERMS:
+                break
+
+        # Fallback pola yang lebih spesifik medis
+        if not patterns_norm:
+            fallback = [
+                "facial steaming", "steam therapy", "skin hydration", "pore dilation",
+                "dermatology steam", "cosmetic dermatology", "skin barrier function",
+                "terapi uap wajah", "hidrasi kulit", "perawatan wajah"
+            ]
+            patterns_norm = [p for p in fallback][:EXPANSION_MIN_TERMS]
+
+        # Cache dan kembalikan
+        _EXPANSION_CACHE[claim_key] = {"patterns": patterns_norm, "ts": now}
+        return patterns_norm
+
     except Exception as e:
-        print(f"[GEN_QUERIES] failed: {e}")
-
-    # Dedupe dan limit
-    unique_queries = []
-    for q in queries:
-        qn = safe_strip(q)
-        if qn and qn not in unique_queries:
-            unique_queries.append(qn)
+        print(f"[EXPAND] Peringatan: ekspansi pola gagal untuk klaim '{claim}': {e}")
+        # Fallback yang lebih baik untuk klaim medis
+        medical_fallback = [
+            "medical research", "clinical study", "dermatology", "skin care",
+            "health effects", "scientific evidence", "medical journal"
+        ]
+        patterns_norm = [p for p in medical_fallback][:EXPANSION_MIN_TERMS]
+        _EXPANSION_CACHE[claim_key] = {"patterns": patterns_norm, "ts": now}
+        return patterns_norm
     
-    return unique_queries[:6]
 
+# -----------------------
+# Scoring relevansi yang dimodifikasi
+# -----------------------
+
+def compute_relevance_score(claim: str, neighbor_text: str, neighbor_title: str = "") -> float:
+    """
+    Hitung skor relevansi menggunakan pola hasil LLM.
+    Score = proporsi pola yang muncul di text/title (dibatasi 0..1).
+    Juga kombinasikan sedikit keyword matching tradisional untuk kata-kata domain penting.
+    """
+    claim_lower = safe_strip(claim).lower()
+    text_lower = (safe_strip(neighbor_text) + " " + safe_strip(neighbor_title)).lower()
+
+    # Dapatkan pola yang dihasilkan LLM (dari cache)
+    try:
+        patterns = expand_relevance_patterns(claim)
+    except Exception:
+        patterns = []
+
+    # Pastikan pola unik dan pendek
+    patterns = [p.strip().lower() for p in patterns if p and len(p) <= 60]
+    patterns = list(dict.fromkeys(patterns))  # preserve order, unique
+
+    # Jika daftar pola kosong karena alasan apapun, fallback ke heuristik minimal
+    if not patterns:
+        patterns = ["kulit", "wajah", "uap", "vapor", "hidrasi"]
+
+    hit_count = 0
+    for p in patterns:
+        # pemeriksaan word boundary untuk token pendek untuk menghindari kecocokan substring yang tidak disengaja
+        if len(p.split()) == 1:
+            # token tunggal: gunakan word boundary
+            if re.search(r'\b' + re.escape(p) + r'\b', text_lower):
+                hit_count += 1
+        else:
+            if p in text_lower:
+                hit_count += 1
+
+    score = hit_count / max(len(patterns), 1)
+    
+    # Soft cap & smoothing: jika sangat sedikit pola yang cocok tapi teks berisi token klaim, tingkatkan sedikit
+    if score < 0.2 and any(tok for tok in re.findall(r"[A-Za-z0-9À-ÿ]{3,}", claim_lower) if tok in text_lower):
+        score = min(score + 0.15, 1.0)
+
+    return float(max(0.0, min(1.0, score)))
+
+# -----------------------
+# Fungsi retrieval dan filtering
+# -----------------------
 
 def safe_cosine_similarity(a: List[float], b: List[float]) -> float:
     """Hitung cosine similarity antara dua vektor secara aman."""
@@ -221,9 +314,8 @@ def safe_cosine_similarity(a: List[float], b: List[float]) -> float:
     except Exception:
         return 0.0
 
-
 def distance_to_similarity(dist: Optional[float]) -> float:
-    """Convert distance metric ke similarity score."""
+    """Konversi metrik jarak ke skor similaritas."""
     if dist is None:
         return 0.0
     try:
@@ -231,11 +323,10 @@ def distance_to_similarity(dist: Optional[float]) -> float:
     except Exception:
         return 0.0
 
-
 def retrieve_neighbors_from_db(query_embedding: List[float], k: int = 5, 
-                              max_chars_each: int = 1200, 
+                              max_chars_each: int = 2000, 
                               debug_print: bool = False) -> List[Dict[str, Any]]:
-    """Retrieve k nearest neighbors dari database menggunakan vector similarity."""
+    """Ambil k tetangga terdekat dari database menggunakan vektor similaritas."""
     conn = connect_db()
     try:
         try:
@@ -260,7 +351,7 @@ def retrieve_neighbors_from_db(query_embedding: List[float], k: int = 5,
         conn.close()
 
     if debug_print and rows:
-        print(f"[DEBUG] Retrieved {len(rows)} rows, first DOI: {rows[0].get('doi', 'No DOI')}")
+        print(f"[DEBUG] Berhasil mengambil {len(rows)} baris, DOI pertama: {rows[0].get('doi', 'Tidak ada DOI')}")
 
     results = []
     for r in rows:
@@ -285,36 +376,9 @@ def retrieve_neighbors_from_db(query_embedding: List[float], k: int = 5,
     
     return results
 
-
-def compute_relevance_score(claim: str, neighbor_text: str, neighbor_title: str = "") -> float:
-    """Hitung relevance score berdasarkan keyword matching dengan medical patterns."""
-    claim_lower = safe_strip(claim).lower()
-    text_lower = safe_strip(neighbor_text).lower()
-    title_lower = safe_strip(neighbor_title).lower()
-
-    medical_patterns = [
-        r'asam lambung|gastric acid|stomach acid',
-        r'perut kosong|empty stomach|fasting|hungry',
-        r'diabetes|diabetic',
-        r'hipertensi|hypertension|blood pressure',
-        r'kolesterol|cholesterol',
-        r'jantung|heart|cardiac',
-        r'kanker|cancer|tumor',
-        r'obesitas|obesity|overweight'
-    ]
-
-    keyword_score = 0.0
-    for pattern in medical_patterns:
-        if re.search(pattern, claim_lower):
-            if re.search(pattern, text_lower) or re.search(pattern, title_lower):
-                keyword_score += 1.0
-
-    return min(keyword_score / len(medical_patterns), 1.0)
-
-
 def filter_by_relevance(claim: str, neighbors: List[Dict[str, Any]], 
                        min_relevance: float = 0.3, debug: bool = False) -> List[Dict[str, Any]]:
-    """Filter neighbors berdasarkan relevance score dan sort by combined score."""
+    """Filter tetangga berdasarkan skor relevansi dan urutkan berdasarkan skor gabungan."""
     filtered = []
     
     for nb in neighbors:
@@ -330,25 +394,122 @@ def filter_by_relevance(claim: str, neighbors: List[Dict[str, Any]],
         if combined_score >= min_relevance:
             filtered.append(nb)
             if debug:
-                print(f"[RELEVANCE] Kept doc {nb.get('safe_id')} (score: {combined_score:.3f})")
+                print(f"[RELEVANSI] Pertahankan dok {nb.get('safe_id')} (skor: {combined_score:.3f})")
         elif debug:
-            print(f"[RELEVANCE] Filtered out doc {nb.get('safe_id')} (score: {combined_score:.3f})")
+            print(f"[RELEVANSI] Filter dok {nb.get('safe_id')} (skor: {combined_score:.3f})")
 
     filtered.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
     return filtered
 
+# -----------------------
+# Fungsi terjemahan dan query expansion
+# -----------------------
 
+def translate_text_gemini(text: str, target_lang: str = "English") -> str:
+    """Terjemahkan teks menggunakan Gemini API."""
+    if not text:
+        return ""
+    
+    prompt = (
+        f"Terjemahkan teks berikut ke bahasa {target_lang}. "
+        f"Pertahankan keringkasan dan preserve terminologi medis bila memungkinkan.\n\n"
+        f"Teks:\n\"\"\"\n{text}\n\"\"\"\n\nOutput hanya teks yang diterjemahkan."
+    )
+    
+    try:
+        resp = client.models.generate_content(
+            model="gemini-2.5-flash-lite",
+            contents=prompt,
+            config={"temperature": 0.0, "max_output_tokens": 256}
+        )
+        txt = extract_text_from_model_resp(resp)
+        txt = safe_strip(txt).replace("```", "")
+        return txt or text
+    except Exception as e:
+        print(f"[TERJEMAH] gagal: {e}")
+        return text
+
+def generate_bilingual_queries(claim: str, langs: List[str] = ["English"]) -> List[str]:
+    """Generate variasi query dalam multiple bahasa dan sinonim yang lebih komprehensif."""
+    queries = []
+    claim_clean = safe_strip(claim)
+    
+    if claim_clean:
+        queries.append(claim_clean)
+
+    # Tambahkan terjemahan
+    for lang in langs:
+        try:
+            translated = translate_text_gemini(claim_clean, target_lang=lang)
+            translated = safe_strip(translated)
+            if translated and translated not in queries:
+                queries.append(translated)
+        except Exception:
+            pass
+
+    # Minta variasi yang lebih spesifik dari LLM
+    english_example = queries[1] if len(queries) > 1 else claim_clean
+    syn_prompt = (
+        f"Anda adalah research assistant medis. Berdasarkan klaim kesehatan ini, "
+        f"buat 4-6 variasi query pencarian akademik yang akan membantu menemukan "
+        f"penelitian ilmiah yang relevan, termasuk:\n"
+        f"- Istilah medis yang tepat\n"
+        f"- Mekanisme biologis yang terlibat\n"
+        f"- Studi klinis terkait\n"
+        f"- Efek fisiologis\n\n"
+        f"Klaim asli: {claim_clean}\n"
+        f"Klaim (English): {english_example}\n\n"
+        f"Kembalikan array JSON dengan query yang bervariasi dari umum ke spesifik.\n"
+        f"Contoh: [\"facial steaming benefits\", \"steam therapy dermatology\", \"skin hydration mechanisms\", \"pore dilation research\"]"
+    )
+    
+    try:
+        resp = client.models.generate_content(
+            model="gemini-2.5-flash-lite",
+            contents=syn_prompt,
+            config={"temperature": 0.3, "max_output_tokens": 300}
+        )
+        txt = extract_text_from_model_resp(resp)
+        txt = safe_strip(txt)
+        
+        variations = []
+        try:
+            if txt:
+                variations = json.loads(txt)
+        except Exception:
+            # Tolerant fallback: pisah baris dan strip bullets
+            for line in (txt or "").splitlines():
+                line = line.strip().lstrip("-• ").strip()
+                if line:
+                    variations.append(line)
+        
+        for query in variations:
+            query_str = safe_strip(query)
+            if query_str and query_str not in queries:
+                queries.append(query_str)
+                
+    except Exception as e:
+        print(f"[GEN_QUERIES] gagal: {e}")
+
+    # Dedupe dan batasi
+    unique_queries = []
+    for q in queries:
+        qn = safe_strip(q)
+        if qn and qn not in unique_queries:
+            unique_queries.append(qn)
+    
+    return unique_queries[:8]  # Increased from 6 to 8 for better coverage
 def retrieve_with_expansion_bilingual(claim: str, k: int = 5, 
                                      expand_queries: bool = True, 
                                      debug: bool = False) -> List[Dict[str, Any]]:
-    """Retrieve documents dengan query expansion dalam multiple bahasa."""
+    """Retrieve dokumen dengan query expansion dalam multiple bahasa."""
     if expand_queries:
         queries = generate_bilingual_queries(claim, langs=["English"])
     else:
         queries = [claim]
 
     if debug:
-        print(f"[BILINGUAL_QUERIES] Using queries: {queries}")
+        print(f"[BILINGUAL_QUERIES] Menggunakan queries: {queries}")
 
     all_neighbors = []
     seen_ids = set()
@@ -357,7 +518,7 @@ def retrieve_with_expansion_bilingual(claim: str, k: int = 5,
         try:
             emb = embed_texts_gemini([query])[0]
         except Exception as e:
-            print(f"[RETRIEVE_BIL] embed failed for query '{query}': {e}")
+            print(f"[RETRIEVE_BIL] embed gagal untuk query '{query}': {e}")
             continue
 
         neighbors = retrieve_neighbors_from_db(emb, k=k, debug_print=debug)
@@ -372,6 +533,9 @@ def retrieve_with_expansion_bilingual(claim: str, k: int = 5,
     filtered.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
     return filtered[:k*3]
 
+# -----------------------
+# Fungsi dynamic fetch dan ingest
+# -----------------------
 
 def load_fetched_file_to_items(path_or_obj):
     """Load dan parse file hasil fetch ke format items yang standardized."""
@@ -435,17 +599,27 @@ def load_fetched_file_to_items(path_or_obj):
                 except Exception:
                     pass
         except Exception as e:
-            print(f"[LOAD_FETCHED] parse error for {p}: {e}")
+            print(f"[LOAD_FETCHED] parse error untuk {p}: {e}")
     
     return items
 
+def save_verification_result(result: Dict[str, Any]) -> None:
+    """Simpan single verification payload ke JSONL (append)."""
+    try:
+        with open(VERIFICATION_RESULTS_PATH, "a", encoding="utf-8") as fo:
+            fo.write(json.dumps(result, ensure_ascii=False) + "\n")
+    except Exception as e:
+        # Jangan hentikan pipeline jika gagal menyimpan; cukup laporkan
+        print(f"[SAVE_VERIF] Gagal menyimpan hasil verifikasi: {e}")
 
 def ingest_abstracts_as_chunks(selected_items: List[Dict[str, Any]]) -> bool:
     """Ingest selected abstracts sebagai chunks ke database."""
     if not selected_items:
         return False
 
-    os.makedirs("data/chunks", exist_ok=True)
+    chuncks_dir = TRAINING_DIR / "data" / "chunks"
+    chuncks_dir.mkdir(parents=True, exist_ok=True)
+
     texts = []
     metas = []
 
@@ -471,7 +645,7 @@ def ingest_abstracts_as_chunks(selected_items: List[Dict[str, Any]]) -> bool:
         return False
 
     out_fname = f"abstract_chunks_{int(time.time())}.jsonl"
-    out_path = os.path.join("data", "chunks", out_fname)
+    out_path = chuncks_dir / out_fname
 
     with open(out_path, "w", encoding="utf-8") as fo:
         for text, meta, vec in zip(texts, metas, vectors):
@@ -488,24 +662,23 @@ def ingest_abstracts_as_chunks(selected_items: List[Dict[str, Any]]) -> bool:
             }
             fo.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-    print(f"[FAST_INGEST] Wrote {len(texts)} abstract chunks to {out_path}")
+    print(f"[FAST_INGEST] Menulis {len(texts)} abstract chunks ke {out_path}")
 
     try:
         ic.ingest()
         time.sleep(1.0)
         return True
     except Exception as e:
-        print(f"[FAST_INGEST] ingest() failed: {e}")
+        print(f"[FAST_INGEST] ingest() gagal: {e}")
         return False
-
 
 def dynamic_fetch_and_update(claim: str, max_fetch_results: int = 10, 
                             top_k_select: int = 8) -> tuple:
-    """Fetch documents dari multiple sources dan select yang paling relevan."""
-    print(f"[DYNAMIC_FETCH] Fetching for: {claim[:80]}...")
+    """Fetch dokumen dari multiple sources dan pilih yang paling relevan."""
+    print(f"[DYNAMIC_FETCH] Fetching untuk: {claim[:80]}...")
     fetched_paths = []
 
-    # Fetch from multiple sources
+    # Fetch dari multiple sources
     sources = [
         ("pubmed", lambda: fs.fetch_pubmed(claim, maximum_results=max_fetch_results)),
         ("crossref", lambda: fs.fetch_crossref(claim, rows=max_fetch_results)),
@@ -519,9 +692,9 @@ def dynamic_fetch_and_update(claim: str, max_fetch_results: int = 10,
                 fetched_paths.append(result)
             time.sleep(0.3)
         except Exception as e:
-            print(f"[DYNAMIC_FETCH] {source_name} failed: {e}")
+            print(f"[DYNAMIC_FETCH] {source_name} gagal: {e}")
 
-    # Parse all fetched items
+    # Parse semua fetched items
     all_items = []
     for fp in fetched_paths:
         try:
@@ -532,10 +705,10 @@ def dynamic_fetch_and_update(claim: str, max_fetch_results: int = 10,
             print(f"[DYNAMIC_FETCH] Error loading fetched file {fp}: {e}")
 
     if not all_items:
-        print("[DYNAMIC_FETCH] No items available after parsing fetched files.")
+        print("[DYNAMIC_FETCH] Tidak ada items yang tersedia setelah parsing fetched files.")
         return False, []
 
-    # Prepare texts for embedding
+    # Siapkan teks untuk embedding
     candidate_texts = []
     candidate_meta = []
     
@@ -546,24 +719,24 @@ def dynamic_fetch_and_update(claim: str, max_fetch_results: int = 10,
             candidate_meta.append(item)
 
     if not candidate_texts:
-        print("[DYNAMIC_FETCH] No candidate texts to embed.")
+        print("[DYNAMIC_FETCH] Tidak ada candidate texts untuk di-embed.")
         return False, []
 
-    # Select most relevant items using cosine similarity
+    # Pilih items paling relevan menggunakan cosine similarity
     try:
         claim_vec = embed_texts_gemini([claim])[0]
         candidate_vecs = embed_texts_gemini(candidate_texts)
     except Exception as e:
-        print(f"[DYNAMIC_FETCH] Embedding failed: {e}")
+        print(f"[DYNAMIC_FETCH] Embedding gagal: {e}")
         return False, []
 
     similarities = [safe_cosine_similarity(claim_vec, v) for v in candidate_vecs]
     idx_sorted = sorted(range(len(similarities)), key=lambda i: similarities[i], reverse=True)[:top_k_select]
     selected = [candidate_meta[i] for i in idx_sorted]
 
-    print(f"[DYNAMIC_FETCH] Selected {len(selected)} items (top sims: {[round(similarities[i], 3) for i in idx_sorted[:5]]})")
+    print(f"[DYNAMIC_FETCH] Terpilih {len(selected)} items (top sims: {[round(similarities[i], 3) for i in idx_sorted[:5]]})")
 
-    # Normalize selected items
+    # Normalisasi selected items
     normalized_selected = []
     for s in selected:
         normalized_selected.append({
@@ -576,16 +749,15 @@ def dynamic_fetch_and_update(claim: str, max_fetch_results: int = 10,
     did_ingest = ingest_abstracts_as_chunks(normalized_selected)
     return did_ingest, normalized_selected
 
-
 def needs_dynamic_fetch(neighbors: List[Dict[str, Any]], claim: str,
                         min_relevance_mean: float = 0.30,
                         min_retriever_mean: float = 0.30,
                         min_max_relevance: float = 0.45,
                         debug: bool = False) -> bool:
-    """Determine apakah perlu dynamic fetch berdasarkan quality metrics."""
+    """Tentukan apakah perlu dynamic fetch berdasarkan quality metrics."""
     if not neighbors:
         if debug:
-            print("[QUALITY_CHECK] No neighbors -> need dynamic fetch.")
+            print("[QUALITY_CHECK] Tidak ada neighbors -> perlu dynamic fetch.")
         return True
 
     relevance_scores = [n.get("relevance_score", 0.0) for n in neighbors if n.get("relevance_score") is not None]
@@ -595,7 +767,7 @@ def needs_dynamic_fetch(neighbors: List[Dict[str, Any]], claim: str,
     retriever_mean = float(sum(similarity_scores) / len(similarity_scores)) if similarity_scores else 0.0
     max_relevance = max(relevance_scores) if relevance_scores else 0.0
 
-    # Check keyword overlap
+    # Periksa keyword overlap
     claim_tokens = set(re.findall(r"[A-Za-zÀ-ÿ0-9]+", safe_strip(claim).lower()))
     
     def has_keyword_match(text: str) -> bool:
@@ -613,7 +785,7 @@ def needs_dynamic_fetch(neighbors: List[Dict[str, Any]], claim: str,
               f"retriever_mean={retriever_mean:.3f}, max_rel={max_relevance:.3f}, "
               f"any_keyword={any_keyword}")
 
-    # Decision logic
+    # Logika keputusan
     quality_thresholds_met = (
         relevance_mean >= min_relevance_mean and 
         retriever_mean >= min_retriever_mean and 
@@ -623,14 +795,13 @@ def needs_dynamic_fetch(neighbors: List[Dict[str, Any]], claim: str,
 
     if not quality_thresholds_met:
         if debug:
-            print("[QUALITY_CHECK] Quality thresholds not met -> dynamic fetch recommended")
+            print("[QUALITY_CHECK] Quality thresholds tidak tercapai -> dynamic fetch direkomendasikan")
         return True
 
     return False
 
-
 def translate_snippets_if_needed(neighbors: List[Dict[str, Any]], target_lang="Indonesian") -> List[Dict[str, Any]]:
-    """Translate snippet text ke target language jika diperlukan berdasarkan heuristic."""
+    """Terjemahkan snippet text ke target language jika diperlukan berdasarkan heuristic."""
     for nb in neighbors:
         text = nb.get("text", "")
         if not text:
@@ -645,16 +816,19 @@ def translate_snippets_if_needed(neighbors: List[Dict[str, Any]], target_lang="I
             try:
                 nb["_text_translated"] = translate_text_gemini(text, target_lang=target_lang)
             except Exception as e:
-                print(f"[TRANSLATE] failed for snippet: {e}")
+                print(f"[TRANSLATE] gagal untuk snippet: {e}")
                 nb["_text_translated"] = text
         else:
             nb["_text_translated"] = text
     
     return neighbors
 
+# -----------------------
+# Fungsi prompt building dan LLM calling
+# -----------------------
 
 def build_prompt(claim: str, neighbors: List[Dict[str, Any]], max_context_chars: int = 3000) -> str:
-    """Build prompt untuk LLM dengan evidence dari neighbors."""
+    """Buat prompt untuk LLM dengan evidence dari neighbors."""
     parts = []
     total_chars = 0
     
@@ -670,7 +844,7 @@ def build_prompt(claim: str, neighbors: List[Dict[str, Any]], max_context_chars:
             source_info += f" | DOI: {doi}"
         if source_file:
             source_info += f" | File: {source_file}"
-        source_info += f" | Relevance: {relevance_score:.3f}"
+        source_info += f" | Relevansi: {relevance_score:.3f}"
         
         part = f"{source_info}\n{text_for_prompt}\n---\n"
         if total_chars + len(part) > max_context_chars:
@@ -683,22 +857,35 @@ def build_prompt(claim: str, neighbors: List[Dict[str, Any]], max_context_chars:
     
     return f"""{PROMPT_HEADER}
 
-CLAIM:
+KLAIM:
 "{claim.strip()}"
 
-BUKTI:
+BUKTI ILMIAH:
 {context_block}
 
-Instruksi:
-- Evaluasi bukti dan tentukan apakah klaim tersebut didukung (VALID) atau dibantah (HOAX).
-- Jelaskan analisis singkat dan sertakan evidence list (id, snippet).
-- Kembalikan hanya JSON yang valid dengan fields: claim, analysis, label, confidence, evidence (array of objects with safe_id & snippet), summary.
+INSTRUKSI ANALISIS:
+- Evaluasi bukti secara menyeluruh dan objektif
+- Pertimbangkan mekanisme biologis yang mendasari klaim
+- Identifikasi kondisi atau batasan di mana klaim mungkin benar
+- Jika ada konflik dalam bukti, jelaskan nuansanya
+- Berikan analisis berdasarkan evidence-based medicine
+
+OUTPUT FORMAT:
+{{
+  "claim": "klaim asli",
+  "analysis": "analisis mendalam tentang mekanisme dan bukti",
+  "label": "VALID/HOAX/PARTIALLY_VALID",
+  "confidence": 0.0-1.0,
+  "conditions": "kondisi di mana klaim benar (jika PARTIALLY_VALID)",
+  "evidence": [
+    {{"safe_id": "id_dokumen", "snippet": "kutipan yang mendukung/menolak", "relevance": "mengapa relevan"}}
+  ],
+  "summary": "ringkasan kesimpulan yang seimbang"
+}}
 """
-
-
 def call_gemini(prompt: str, model: str = "gemini-2.5-flash-lite", 
-               temperature: float = 0.0, max_output_tokens: int = 1200) -> str:
-    """Call Gemini API dengan fallback ke multiple models."""
+               temperature: float = 0.0, max_output_tokens: int = 2000) -> str:
+    """Panggil Gemini API dengan fallback ke multiple models."""
     models_to_try = [model, "gemini-2.5-flash", "gemini-2.0-flash"]
     
     for m in models_to_try:
@@ -719,75 +906,39 @@ def call_gemini(prompt: str, model: str = "gemini-2.5-flash-lite",
             if not text:
                 continue
             
-            # Clean JSON fences
+            # Bersihkan JSON fences
             text = text.replace("```json", "").replace("```", "").strip()
             return text
             
         except Exception as e:
-            print(f"[DEBUG] call_gemini with model {m} failed: {str(e)}")
+            print(f"[DEBUG] call_gemini dengan model {m} gagal: {str(e)}")
             continue
     
-    raise RuntimeError("All Gemini model calls failed or returned empty.")
-
+    raise RuntimeError("Semua panggilan model Gemini gagal atau mengembalikan kosong.")
 
 def fix_common_json_issues(json_str: str) -> str:
-    """Fix common JSON syntax issues."""
+    """Perbaiki masalah sintaks JSON yang umum."""
     s = json_str
-    # Remove trailing commas
+    # Hapus trailing commas
     s = re.sub(r',(\s*[}\]])', r'\1', s)
-    # Remove non-printable characters except newlines, returns, tabs
+    # Hapus karakter non-printable kecuali newlines, returns, tabs
     s = ''.join(ch for ch in s if ord(ch) >= 32 or ch in '\n\r\t')
     return s
 
-
-def validate_and_normalize_result(result: dict) -> dict:
-    """Validate dan normalize result dari LLM ke format yang konsisten."""
-    result = result or {}
-    
-    # Normalize label
-    if "label" not in result:
-        result["label"] = "HOAX"
-    
-    label = safe_strip(result.get("label", "")).upper()
-    if label not in ["VALID", "HOAX"]:
-        label_mapping = {
-            "TRUE": "VALID", "BENAR": "VALID",
-            "FALSE": "HOAX", "SALAH": "HOAX",
-            "UNCERTAIN": "HOAX", "TIDAK TERDETEKSI": "HOAX", "TIDAK PASTI": "HOAX"
-        }
-        result["label"] = label_mapping.get(label, "HOAX")
-    
-    # Normalize confidence
-    try:
-        confidence = float(result.get("confidence", 0.0))
-        confidence = max(0.0, min(1.0, confidence))
-    except Exception:
-        confidence = 0.0
-    result["confidence"] = confidence
-    
-    # Set defaults
-    result.setdefault("analysis", "")
-    result.setdefault("evidence", [])
-    result.setdefault("summary", "")
-    result.setdefault("references", [])
-    
-    return result
-
-
 def extract_json_from_text(text: str) -> Dict[str, Any]:
-    """Extract dan parse JSON dari response text LLM."""
+    """Ekstrak dan parse JSON dari response text LLM."""
     s = safe_strip(text)
     if not s:
         return validate_and_normalize_result({})
     
-    # Try plain JSON parse first
+    # Coba parsing JSON biasa dulu
     try:
         parsed = json.loads(s)
         return validate_and_normalize_result(parsed)
     except Exception:
         pass
     
-    # Try to find JSON object in text
+    # Coba cari JSON object dalam teks
     start = -1
     brace_count = 0
     
@@ -804,7 +955,7 @@ def extract_json_from_text(text: str) -> Dict[str, Any]:
                     parsed = json.loads(candidate)
                     return validate_and_normalize_result(parsed)
                 except Exception:
-                    # Try fixing common issues
+                    # Coba perbaiki masalah umum
                     candidate_fixed = fix_common_json_issues(candidate)
                     try:
                         parsed = json.loads(candidate_fixed)
@@ -812,40 +963,84 @@ def extract_json_from_text(text: str) -> Dict[str, Any]:
                     except Exception:
                         pass
     
-    # Fallback: return default HOAX response
-    print("[WARNING] Cannot parse JSON from LLM. Returning default HOAX response.")
+    # Fallback: kembalikan response HOAX default
+    print("[PERINGATAN] Tidak dapat mem-parse JSON dari LLM. Mengembalikan response HOAX default.")
     return validate_and_normalize_result({})
 
+def validate_and_normalize_result(result: dict) -> dict:
+    """Validasi dan normalisasi result dari LLM ke format yang konsisten."""
+    result = result or {}
+    
+    # Normalisasi label - tambah support untuk PARTIALLY_VALID
+    if "label" not in result:
+        result["label"] = "HOAX"
+    
+    label = safe_strip(result.get("label", "")).upper()
+    if label not in ["VALID", "HOAX", "PARTIALLY_VALID"]:
+        label_mapping = {
+            "TRUE": "VALID", "BENAR": "VALID",
+            "FALSE": "HOAX", "SALAH": "HOAX",
+            "PARTIAL": "PARTIALLY_VALID", "SEBAGIAN": "PARTIALLY_VALID",
+            "PARTIALLY_TRUE": "PARTIALLY_VALID", "SEBAGIAN_BENAR": "PARTIALLY_VALID",
+            "CONDITIONAL": "PARTIALLY_VALID", "KONDISIONAL": "PARTIALLY_VALID",
+            "CONTEXT_DEPENDENT": "PARTIALLY_VALID",
+            "UNCERTAIN": "PARTIALLY_VALID", "TIDAK_PASTI": "PARTIALLY_VALID"
+        }
+        result["label"] = label_mapping.get(label, "HOAX")
+    else:
+        result["label"] = label
+    
+    # Normalisasi confidence
+    try:
+        confidence = float(result.get("confidence", 0.0))
+        confidence = max(0.0, min(1.0, confidence))
+    except Exception:
+        confidence = 0.0
+    result["confidence"] = confidence
+    
+    # Set defaults
+    result.setdefault("analysis", "")
+    result.setdefault("evidence", [])
+    result.setdefault("summary", "")
+    result.setdefault("references", [])
+    result.setdefault("conditions", "")  # Untuk PARTIALLY_VALID
+    
+    return result
 
 def decide_final_label_and_confidence(parsed: Dict[str, Any], neighbors: List[Dict[str, Any]], 
                                     combined_confidence: float) -> Dict[str, Any]:
-    """Decide final label dan confidence berdasarkan LLM output dan heuristics."""
+    """Tentukan label dan confidence akhir berdasarkan output LLM dan heuristics."""
     llm_label = parsed.get("label", "").upper()
     llm_confidence = float(parsed.get("confidence", 0.0))
     
-    # Final decision logic
-    if llm_label in ["VALID", "HOAX"] and llm_confidence >= LLM_CONF_THRESHOLD:
+    # Logika keputusan akhir - include PARTIALLY_VALID
+    if llm_label in ["VALID", "HOAX", "PARTIALLY_VALID"] and llm_confidence >= LLM_CONF_THRESHOLD:
         final_label = llm_label
         final_confidence = llm_confidence
-        decision_reason = f"Used LLM verdict (label={llm_label}, confidence={llm_confidence:.2f})"
+        decision_reason = f"Menggunakan vonis LLM (label={llm_label}, confidence={llm_confidence:.2f})"
     else:
-        final_label = "VALID" if combined_confidence >= COMBINED_CONF_THRESHOLD else "HOAX"
+        # Untuk fallback, gunakan combined confidence dengan threshold yang berbeda
+        if combined_confidence >= 0.7:
+            final_label = "VALID"
+        elif combined_confidence >= 0.4:
+            final_label = "PARTIALLY_VALID"
+        else:
+            final_label = "HOAX"
+        
         final_confidence = combined_confidence
-        decision_reason = f"Used combined retriever+LLM fallback (combined_confidence={combined_confidence:.2f})"
+        decision_reason = f"Menggunakan fallback retriever+LLM gabungan (combined_confidence={combined_confidence:.2f})"
     
     return {
         "final_label": final_label,
         "final_confidence": float(final_confidence),
         "decision_reason": decision_reason
     }
-
-
 def build_frontend_payload(claim: str, parsed: Dict[str, Any], neighbors: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Build payload untuk frontend dari parsed result dan neighbors."""
-    # Map neighbors by ID for reference
+    """Buat payload untuk frontend dari parsed result dan neighbors."""
+    # Map neighbors berdasarkan ID untuk referensi
     neighbor_map = {n.get("safe_id") or str(n.get("doc_id")): n for n in neighbors}
     
-    # Process evidence list
+    # Proses evidence list
     evidence_list = parsed.get("evidence", []) or []
     references = []
     frontend_evidence = []
@@ -854,7 +1049,7 @@ def build_frontend_payload(claim: str, parsed: Dict[str, Any], neighbors: List[D
         safe_id = ev.get("safe_id") or ev.get("id") or ev.get("doc_id") or ""
         nb = neighbor_map.get(safe_id) or {}
         
-        # Build evidence item
+        # Buat evidence item
         doi_val = safe_strip(ev.get("doi", "") or nb.get("doi", "") or "")
         url_val = ""
         if doi_val:
@@ -873,7 +1068,7 @@ def build_frontend_payload(claim: str, parsed: Dict[str, Any], neighbors: List[D
         }
         frontend_evidence.append(evidence_item)
         
-        # Build reference
+        # Buat reference
         ref_entry = {
             "safe_id": safe_id,
             "doi": doi_val,
@@ -882,12 +1077,12 @@ def build_frontend_payload(claim: str, parsed: Dict[str, Any], neighbors: List[D
             "relevance": evidence_item["relevance_score"]
         }
         
-        # Add to references if not duplicate
+        # Tambahkan ke references jika tidak duplikat
         if not any(r.get("safe_id") == ref_entry["safe_id"] and r.get("url") == ref_entry["url"] 
                   for r in references):
             references.append(ref_entry)
     
-    # Fallback: use top neighbors as evidence if empty
+    # Fallback: gunakan top neighbors sebagai evidence jika kosong
     if not frontend_evidence:
         for n in neighbors[:6]:
             safe_id = n.get("safe_id") or n.get("doc_id") or ""
@@ -916,6 +1111,9 @@ def build_frontend_payload(claim: str, parsed: Dict[str, Any], neighbors: List[D
         "metadata": parsed.get("_meta", {})
     }
 
+# -----------------------
+# Main verification function
+# -----------------------
 
 def verify_claim_local(claim: str, k: int = 5, dry_run: bool = False, 
                       enable_expansion: bool = True, min_relevance: float = 0.25,
@@ -927,7 +1125,7 @@ def verify_claim_local(claim: str, k: int = 5, dry_run: bool = False,
         raise ValueError("Klaim kosong.")
 
     try:
-        print("[1/6] Retrieving with bilingual query expansion...")
+        print("[1/6] Mengambil dengan bilingual query expansion...")
         if enable_expansion:
             neighbors = retrieve_with_expansion_bilingual(claim, k=k, expand_queries=True, debug=debug_retrieval)
         else:
@@ -935,21 +1133,21 @@ def verify_claim_local(claim: str, k: int = 5, dry_run: bool = False,
             neighbors = retrieve_neighbors_from_db(emb, k=k, debug_print=debug_retrieval)
             neighbors = filter_by_relevance(claim, neighbors, min_relevance=min_relevance, debug=debug_retrieval)
 
-        # Check if dynamic fetch needed
+        # Periksa apakah perlu dynamic fetch
         quality_need_fetch = force_dynamic_fetch or needs_dynamic_fetch(
             neighbors, claim, min_relevance_mean=min_relevance, min_retriever_mean=0.25, debug=debug_retrieval
         )
 
         dynamic_selected = None
         if quality_need_fetch:
-            print("[2/6] Retrieval quality low or insufficient. Attempting dynamic fetch...")
+            print("[2/6] Kualitas retrieval rendah atau tidak cukup. Mencoba dynamic fetch...")
             try:
                 did_update, dynamic_selected = dynamic_fetch_and_update(claim, max_fetch_results=30, top_k_select=12)
                 if did_update:
-                    print("[DYNAMIC_FETCH] Ingest performed. Waiting for DB to be ready...")
+                    print("[DYNAMIC_FETCH] Ingest dilakukan. Menunggu DB siap...")
                     time.sleep(2.0)
                     
-                    # Retry retrieval after ingest
+                    # Retry retrieval setelah ingest
                     if enable_expansion:
                         neighbors = retrieve_with_expansion_bilingual(claim, k=k, expand_queries=True, debug=debug_retrieval)
                     else:
@@ -958,17 +1156,17 @@ def verify_claim_local(claim: str, k: int = 5, dry_run: bool = False,
                         neighbors = filter_by_relevance(claim, neighbors, min_relevance=min_relevance, debug=debug_retrieval)
 
                     if debug_retrieval:
-                        print("\n[DEBUG] Neighbors after retry (top 6):")
+                        print("\n[DEBUG] Neighbors setelah retry (top 6):")
                         for i, n in enumerate(neighbors[:6], 1):
                             print(f"  [{i}] {n.get('safe_id')} rel={n.get('relevance_score',0):.3f} doi={n.get('doi','')}")
-                            print(f"        snippet: {n.get('text','')[:200]}...\n")
+                            print(f"        snippet: {n.get('text','')[:2000]}...\n")
 
-                    # Use fetched items as fallback if still insufficient
+                    # Gunakan fetched items sebagai fallback jika masih tidak cukup
                     if needs_dynamic_fetch(neighbors, claim, min_relevance_mean=min_relevance, 
                                          min_retriever_mean=0.25, debug=debug_retrieval):
-                        print("[DYNAMIC_FETCH] Retry retrieval after dynamic fetch still low quality.")
+                        print("[DYNAMIC_FETCH] Retry retrieval setelah dynamic fetch masih berkualitas rendah.")
                         if dynamic_selected:
-                            print("[DYNAMIC_FETCH] Using fetched items as fallback context for LLM.")
+                            print("[DYNAMIC_FETCH] Menggunakan fetched items sebagai fallback context untuk LLM.")
                             fallback_neighbors = []
                             for idx, s in enumerate(dynamic_selected, 1):
                                 text = (s.get("title", "") + "\n\n" + s.get("abstract", "")).strip()
@@ -988,11 +1186,11 @@ def verify_claim_local(claim: str, k: int = 5, dry_run: bool = False,
                         else:
                             neighbors = []
                 else:
-                    print("[DYNAMIC_FETCH] No new items fetched or ingest failed.")
+                    print("[DYNAMIC_FETCH] Tidak ada items baru yang di-fetch atau ingest gagal.")
             except Exception as e:
-                print(f"[ERROR] Dynamic fetch failed: {e}")
+                print(f"[ERROR] Dynamic fetch gagal: {e}")
 
-        # Handle no neighbors case
+        # Handle kasus tidak ada neighbors
         if not neighbors:
             frontend = {
                 "claim": claim,
@@ -1008,34 +1206,34 @@ def verify_claim_local(claim: str, k: int = 5, dry_run: bool = False,
             print(json.dumps(frontend, ensure_ascii=False, indent=2))
             return {"_frontend_payload": frontend}
 
-        # Translate snippets for LLM
+        # Terjemahkan snippets untuk LLM
         neighbors = translate_snippets_if_needed(neighbors, target_lang="Indonesian")
 
         if dry_run:
             print("\n=== DRY RUN: Neighbors ===")
             for i, n in enumerate(neighbors, 1):
                 relevance = n.get('relevance_score', 0)
-                print(f"\n[{i}] {n.get('safe_id')} (relevance: {relevance:.3f})")
+                print(f"\n[{i}] {n.get('safe_id')} (relevansi: {relevance:.3f})")
                 print(f"DOI: {n.get('doi', 'N/A')}")
                 print(f"Text: {n.get('_text_translated', n.get('text',''))[:400]}...")
             return {"dry_run_neighbors": neighbors}
 
-        print(f"[3/6] Building prompt with {len(neighbors)} relevant neighbors...")
+        print(f"[3/6] Membuat prompt dengan {len(neighbors)} neighbors yang relevan...")
         prompt = build_prompt(claim, neighbors, max_context_chars=3500)
 
-        print("[4/6] Calling LLM for verification...")
+        print("[4/6] Memanggil LLM untuk verifikasi...")
         try:
             raw_response = call_gemini(prompt, temperature=0.0, max_output_tokens=1600)
         except Exception as e:
-            print(f"[ERROR] call_gemini failed: {e}")
+            print(f"[ERROR] call_gemini gagal: {e}")
             raw_response = ""
 
-        print("[5/6] Parsing result from LLM...")
+        print("[5/6] Parsing hasil dari LLM...")
         parsed = extract_json_from_text(raw_response) if raw_response else validate_and_normalize_result({})
 
-        print("[6/6] Enriching with metadata and building frontend payload...")
+        print("[6/6] Memperkaya dengan metadata dan membuat frontend payload...")
         
-        # Calculate metrics
+        # Hitung metrics
         similarity_scores = [distance_to_similarity(n.get("distance")) for n in neighbors if n.get("distance") is not None]
         relevance_scores = [n.get("relevance_score", 0.0) for n in neighbors]
         
@@ -1045,7 +1243,7 @@ def verify_claim_local(claim: str, k: int = 5, dry_run: bool = False,
         
         combined_confidence = (0.5 * llm_confidence + 0.3 * relevance_mean + 0.2 * retriever_mean)
 
-        # Add metadata
+        # Tambahkan metadata
         parsed["_meta"] = {
             "neighbors_count": len(neighbors),
             "neighbors_with_doi": len([n for n in neighbors if n.get("doi")]),
@@ -1057,33 +1255,49 @@ def verify_claim_local(claim: str, k: int = 5, dry_run: bool = False,
             "raw_llm_preview": safe_strip(raw_response)[:500] if raw_response else ""
         }
 
-        # Final decision logic
+        # Logika keputusan akhir
         final_decision = decide_final_label_and_confidence(parsed, neighbors, combined_confidence)
         parsed.update(final_decision)
         
-        # Force final labels (only VALID/HOAX)
+        # Paksa label akhir (hanya VALID/HOAX)
         parsed["label"] = parsed["final_label"]
         parsed["confidence"] = parsed["final_confidence"]
 
-        # Build frontend payload
+        # Buat frontend payload
         frontend = build_frontend_payload(claim, parsed, neighbors)
-        
-        # Print JSON output and return
+
+        # Simpan hasil verifikasi agar bisa di-ingest oleh backend / pipeline lain
+        try:
+            # Sertakan metadata internal jika ada
+            payload_to_save = {
+                "timestamp": int(time.time()),
+                "claim": frontend.get("claim"),
+                "frontend": frontend,
+                "_parsed_meta": parsed.get("_meta", {}),
+            }
+            save_verification_result(payload_to_save)
+        except Exception as e:
+            print(f"[SAVE_VERIF] Warning: gagal menyimpan payload: {e}")
+
+        # Print JSON output dan return
         print("\n[JSON_OUTPUT]")
         print(json.dumps(frontend, ensure_ascii=False, indent=2))
         
         return {"_frontend_payload": frontend}
 
     except Exception as e:
-        print(f"[ERROR] Exception in verify_claim_local: {str(e)}")
+        print(f"[ERROR] Exception dalam verify_claim_local: {str(e)}")
         traceback.print_exc()
         raise
 
+# -----------------------
+# CLI main function
+# -----------------------
 
 def main():
     """CLI entry point untuk menjalankan fact-checking system."""
     parser = argparse.ArgumentParser(
-        description="Improved Prompt & Verify - Healthify RAG with bilingual retrieval"
+        description="Improved Prompt & Verify - Healthify RAG dengan bilingual retrieval dan LLM-based pattern expansion"
     )
     parser.add_argument("--claim", "-c", type=str,
                        help="Klaim yang akan diverifikasi (kosong untuk mode interaktif)")
@@ -1108,7 +1322,7 @@ def main():
 
     claim = args.claim
     if not claim:
-        print("Masukan klaim (akhiri dengan ENTER): ")
+        print("Masukkan klaim (akhiri dengan ENTER): ")
         claim = input("> ").strip()
 
     if not claim:
@@ -1116,16 +1330,16 @@ def main():
         sys.exit(1)
 
     if args.enable_prefetch:
-        # Generate query variations and optionally fetch
+        # Generate query variations dan optionally fetch
         queries = generate_bilingual_queries(claim, langs=["English"])
-        print(f"[MAIN] Generated queries for fetch: {queries}")
+        print(f"[MAIN] Generated queries untuk fetch: {queries}")
 
         for q in queries:
             try:
-                print(f"[MAIN] Fetching for expanded query: {q}")
+                print(f"[MAIN] Fetching untuk expanded query: {q}")
                 fetch_all_sources(q, pubmed_max=5, crossref_rows=5, semantic_limit=5, delay_between_sources=0.3)
             except Exception as e:
-                print(f"[MAIN] fetch_all_sources failed for '{q}': {e}")
+                print(f"[MAIN] fetch_all_sources gagal untuk '{q}': {e}")
 
     try:
         result = verify_claim_local(
@@ -1141,9 +1355,9 @@ def main():
         print(f"\n❌ Gagal verifikasi klaim: {str(e)}")
         sys.exit(1)
 
-    # Print human-friendly summary
+    # Print ringkasan yang user-friendly
     print("\n" + "="*60)
-    print("HASIL VERIFIKASI (ringkasan human-readable)")
+    print("HASIL VERIFIKASI (ringkasan untuk pengguna)")
     print("="*60)
 
     frontend = result.get("_frontend_payload") if isinstance(result, dict) else None
@@ -1151,14 +1365,14 @@ def main():
         print(f"\n📋 KLAIM: {frontend.get('claim')}")
         print(f"\n🏷️  LABEL: {frontend.get('label')}")
         print(f"📊 CONFIDENCE: {frontend.get('confidence'):.2%}")
-        print(f"\n💡 SUMMARY:\n{frontend.get('summary','')}")
-        print(f"\n🔍 CONCLUSION:\n{frontend.get('conclusion','')}")
+        print(f"\n💡 RINGKASAN:\n{frontend.get('summary','')}")
+        print(f"\n🔍 KESIMPULAN:\n{frontend.get('conclusion','')}")
         
         metadata = frontend.get("metadata", {})
         if metadata:
             print(f"\n📈 METADATA:")
-            print(f"   - Neighbors retrieved: {metadata.get('neighbors_count', 0)}")
-            print(f"   - Neighbors with DOI: {metadata.get('neighbors_with_doi', 0)}")
+            print(f"   - Neighbors yang diambil: {metadata.get('neighbors_count', 0)}")
+            print(f"   - Neighbors dengan DOI: {metadata.get('neighbors_with_doi', 0)}")
             print(f"   - Mean relevance score: {metadata.get('relevance_mean', 0):.3f}")
             print(f"   - Mean similarity score: {metadata.get('retriever_mean_similarity', 0):.3f}")
             print(f"   - Combined confidence: {metadata.get('combined_confidence', 0):.2%}")

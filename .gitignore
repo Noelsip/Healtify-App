@@ -16,6 +16,7 @@ __pycache__/
 # Django specific
 backend/db.sqlite3
 backend/*/migrations/*
+backend/api/migrations/*
 !backend/*/migrations/__init__.py
 
 # Frontend dependencies dan build

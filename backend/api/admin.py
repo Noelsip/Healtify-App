@@ -1,4 +1,6 @@
 from django.contrib import admin
+from django.utils.html import format_html
+from django.urls import reverse
 from .models import Source, Claim, ClaimSource, VerificationResult, FAQItem, Dispute
 
 # admin untuk source
@@ -45,12 +47,71 @@ class VerificationResultAdmin(admin.ModelAdmin):
 
 # Admin untuk report
 @admin.register(Dispute)
-class ReportAdmin(admin.ModelAdmin):
-    list_display = ('id', 'claim_id', 'reporter_name', 'reviewed', 'created_at')
-    list_filter = ('reviewed',)
-    search_fields = ('reason', 'supporting_doi', 'claim_text')
-    readonly_fields = ('created_at',)
+class DisputeAdmin(admin.ModelAdmin):
+    list_display = ('id', 'claim_link', 'reporter_name', 'status', 'reviewed', 'reviewed_by', 'created_at')
+    list_filter = ('status', 'reviewed', 'created_at')
+    search_fields = ('reason', 'supporting_doi', 'claim_text', 'reporter_email', 'reviewer_note')
+    readonly_fields = ('created_at', 'reviewed_at', 'original_label', 'original_confidence')
     ordering = ('-created_at',)
+    
+    fieldsets = (
+        ('Dispute Information', {
+            'fields': ('claim', 'claim_text', 'reason')
+        }),
+        ('Reporter Details', {
+            'fields': ('reporter_name', 'reporter_email')
+        }),
+        ('Supporting Evidence', {
+            'fields': ('supporting_doi', 'supporting_url', 'supporting_file')
+        }),
+        ('Review Status', {
+            'fields': ('status', 'reviewed', 'review_note', 'reviewed_by', 'reviewed_at')
+        }),
+        ('Original Verification', {
+            'fields': ('original_label', 'original_confidence'),
+            'classes': ('collapse',)
+        }),
+        ('Timestamps', {
+            'fields': ('created_at',),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    def claim_link(self, obj):
+        if obj.claim:
+            url = reverse('admin:api_claim_change', args=[obj.claim.id])
+            return format_html('<a href="{}">{}</a>', url, f"Claim #{obj.claim.id}")
+        return "No Claim"
+    claim_link.short_description = 'Related Claim'
+    
+    actions = ['mark_as_reviewed', 'approve_disputes', 'reject_disputes']
+    
+    def mark_as_reviewed(self, request, queryset):
+        from django.utils import timezone
+        updated = queryset.update(reviewed=True, reviewed_at=timezone.now())
+        self.message_user(request, f'{updated} disputes marked as reviewed.')
+    mark_as_reviewed.short_description = 'Mark selected as reviewed'
+    
+    def approve_disputes(self, request, queryset):
+        from django.utils import timezone
+        updated = queryset.update(
+            status=Dispute.STATUS_APPROVED,
+            reviewed=True,
+            reviewed_at=timezone.now()
+        )
+        self.message_user(request, f'{updated} disputes approved.')
+    approve_disputes.short_description = 'Approve selected disputes'
+    
+    def reject_disputes(self, request, queryset):
+        from django.utils import timezone
+        updated = queryset.update(
+            status=Dispute.STATUS_REJECTED,
+            reviewed=True,
+            reviewed_at=timezone.now()
+        )
+        self.message_user(request, f'{updated} disputes rejected.')
+    reject_disputes.short_description = 'Reject selected disputes'
+
 
 # Admin untuk FAQItem
 @admin.register(FAQItem)

@@ -11,7 +11,7 @@ from typing import List, Dict, Any, Optional
 from functools import lru_cache
 
 # library ketiga
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 from google import genai
 from psycopg2.extras import RealDictCursor
 from pgvector.psycopg2 import register_vector
@@ -30,7 +30,7 @@ BASE = pathlib.Path(__file__).parent
 TRAINING_DIR = BASE.parent          
 PROJECT_ROOT = TRAINING_DIR.parent       
 
-# Pastikan folder data/chunks exists
+# Memastikan folder data/chunks exists
 DATA_DIR = TRAINING_DIR / "data"
 CHUNKS_DIR = DATA_DIR / "chunks"
 
@@ -44,29 +44,79 @@ REPO_ROOT = str(PROJECT_ROOT)
 sys.path.insert(0, SCRIPT_DIR)
 sys.path.insert(0, REPO_ROOT)
 
-load_dotenv(dotenv_path=PROJECT_ROOT / ".env") 
+def load_environment_variables():
+    """Load environment variables dengan fallback ke multiple lokasi."""
+    dotenv_locations = [
+        TRAINING_DIR / ".env",
+        PROJECT_ROOT / ".env",
+        find_dotenv()
+    ]
+    
+    loaded = False
+    for dotenv_path in dotenv_locations:
+        if dotenv_path and pathlib.Path(dotenv_path).exists():
+            load_dotenv(dotenv_path=dotenv_path, override=True)
+            loaded = True
+            print(f"[ENV] Loaded environment from: {dotenv_path}", file=sys.stderr)
+            break
+    
+    if not loaded:
+        print("[ENV] WARNING: No .env file found in standard locations", file=sys.stderr)
+        # Mencoba load dari environment yang sudah ada
+        load_dotenv()
+    
+    return loaded
 
+# Load environment variables
+load_environment_variables()
+
+# error handling untuk client initialization
 try:
     client = getattr(cae, "client", None)
-except Exception:
+except Exception as e:
+    print(f"[INIT] Warning: Could not get client from cae module: {e}", file=sys.stderr)
     client = None
 
 if client is None:
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
     if not GEMINI_API_KEY:
-        raise RuntimeError("GEMINI_API_KEY tidak ditemukan di environment variables atau .env file.")
-    client = genai.Client(api_key=GEMINI_API_KEY)
+        error_msg = (
+            "GEMINI_API_KEY tidak ditemukan di environment variables.\n"
+            f"Lokasi .env yang dicek:\n"
+            f"  1. {TRAINING_DIR / '.env'}\n"
+            f"  2. {PROJECT_ROOT / '.env'}\n"
+            f"  3. Auto-detected location\n"
+            f"Pastikan file .env exists dan berisi GEMINI_API_KEY=your_key_here"
+        )
+        print(f"[ERROR] {error_msg}", file=sys.stderr)
+        sys.exit(2)  # Exit code 2 untuk missing configuration
+    
+    try:
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        print("[INIT] Gemini client initialized successfully", file=sys.stderr)
+    except Exception as e:
+        print(f"[ERROR] Failed to initialize Gemini client: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(2)
 
-# Pemeriksaan koneksi database
-try:
-    conn = connect_db()
-    with conn.cursor() as cur:
-        cur.execute(f"SELECT count(*) FROM {DB_TABLE};")
-        cnt = cur.fetchone()
-        print(f"[DB] baris dalam tabel embeddings: {cnt}")
-    conn.close()
-except Exception as e:
-    print(f"[DB] Peringatan: tidak dapat melakukan pengecekan awal ke DB: {str(e)}")
+# Better database connection check dengan proper error handling
+def check_database_connection():
+    """Check database connection dengan error handling yang lebih baik."""
+    try:
+        conn = connect_db()
+        with conn.cursor() as cur:
+            cur.execute(f"SELECT count(*) FROM {DB_TABLE};")
+            cnt = cur.fetchone()
+            print(f"[DB] Rows in embeddings table: {cnt[0] if cnt else 0}", file=sys.stderr)
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"[DB] WARNING: Database connection check failed: {str(e)}", file=sys.stderr)
+        print("[DB] Verification will continue but may fail if database is required", file=sys.stderr)
+        return False
+
+# Check database pada startup
+db_available = check_database_connection()
 
 # Konstanta konfigurasi
 PROMPT_HEADER = """
@@ -76,8 +126,8 @@ Anda adalah sistem verifikasi fakta medis yang teliti. Tugas Anda:
 3) Output JSON dengan fields: claim, analysis, label (VALID/HOAX/PARTIALLY_VALID), confidence (0-1), evidence (list), summary.
 """
 
-LLM_CONF_THRESHOLD = 0.50
-COMBINED_CONF_THRESHOLD = 0.50
+LLM_CONF_THRESHOLD = 0.75
+COMBINED_CONF_THRESHOLD = 0.75
 
 # Konfigurasi untuk ekspansi pola relevansi berbasis LLM
 _EXPANSION_CACHE: Dict[str, Dict[str, Any]] = {}
@@ -1124,8 +1174,12 @@ def verify_claim_local(claim: str, k: int = 5, dry_run: bool = False,
     if not claim:
         raise ValueError("Klaim kosong.")
 
+    # ✅ Check database availability
+    if not db_available:
+        print("[WARNING] Database not available, verification may be limited", file=sys.stderr)
+
     try:
-        print("[1/6] Mengambil dengan bilingual query expansion...")
+        print("[1/6] Mengambil dengan bilingual query expansion...", file=sys.stderr)
         if enable_expansion:
             neighbors = retrieve_with_expansion_bilingual(claim, k=k, expand_queries=True, debug=debug_retrieval)
         else:
@@ -1133,18 +1187,18 @@ def verify_claim_local(claim: str, k: int = 5, dry_run: bool = False,
             neighbors = retrieve_neighbors_from_db(emb, k=k, debug_print=debug_retrieval)
             neighbors = filter_by_relevance(claim, neighbors, min_relevance=min_relevance, debug=debug_retrieval)
 
-        # Periksa apakah perlu dynamic fetch
+        # Memeriksa apakah perlu dynamic fetch
         quality_need_fetch = force_dynamic_fetch or needs_dynamic_fetch(
             neighbors, claim, min_relevance_mean=min_relevance, min_retriever_mean=0.25, debug=debug_retrieval
         )
 
         dynamic_selected = None
         if quality_need_fetch:
-            print("[2/6] Kualitas retrieval rendah atau tidak cukup. Mencoba dynamic fetch...")
+            print("[2/6] Kualitas retrieval rendah atau tidak cukup. Mencoba dynamic fetch...", file=sys.stderr)
             try:
                 did_update, dynamic_selected = dynamic_fetch_and_update(claim, max_fetch_results=30, top_k_select=12)
                 if did_update:
-                    print("[DYNAMIC_FETCH] Ingest dilakukan. Menunggu DB siap...")
+                    print("[DYNAMIC_FETCH] Ingest dilakukan. Menunggu DB siap...", file=sys.stderr)
                     time.sleep(2.0)
                     
                     # Retry retrieval setelah ingest
@@ -1156,17 +1210,17 @@ def verify_claim_local(claim: str, k: int = 5, dry_run: bool = False,
                         neighbors = filter_by_relevance(claim, neighbors, min_relevance=min_relevance, debug=debug_retrieval)
 
                     if debug_retrieval:
-                        print("\n[DEBUG] Neighbors setelah retry (top 6):")
+                        print("\n[DEBUG] Neighbors setelah retry (top 6):", file=sys.stderr)
                         for i, n in enumerate(neighbors[:6], 1):
-                            print(f"  [{i}] {n.get('safe_id')} rel={n.get('relevance_score',0):.3f} doi={n.get('doi','')}")
-                            print(f"        snippet: {n.get('text','')[:2000]}...\n")
+                            print(f"  [{i}] {n.get('safe_id')} rel={n.get('relevance_score',0):.3f} doi={n.get('doi','')}", file=sys.stderr)
+                            print(f"        snippet: {n.get('text','')[:200]}...\n", file=sys.stderr)
 
-                    # Gunakan fetched items sebagai fallback jika masih tidak cukup
+                    # Menggunakan fetched items sebagai fallback jika masih tidak cukup
                     if needs_dynamic_fetch(neighbors, claim, min_relevance_mean=min_relevance, 
                                          min_retriever_mean=0.25, debug=debug_retrieval):
-                        print("[DYNAMIC_FETCH] Retry retrieval setelah dynamic fetch masih berkualitas rendah.")
+                        print("[DYNAMIC_FETCH] Retry retrieval setelah dynamic fetch masih berkualitas rendah.", file=sys.stderr)
                         if dynamic_selected:
-                            print("[DYNAMIC_FETCH] Menggunakan fetched items sebagai fallback context untuk LLM.")
+                            print("[DYNAMIC_FETCH] Menggunakan fetched items sebagai fallback context untuk LLM.", file=sys.stderr)
                             fallback_neighbors = []
                             for idx, s in enumerate(dynamic_selected, 1):
                                 text = (s.get("title", "") + "\n\n" + s.get("abstract", "")).strip()
@@ -1186,15 +1240,16 @@ def verify_claim_local(claim: str, k: int = 5, dry_run: bool = False,
                         else:
                             neighbors = []
                 else:
-                    print("[DYNAMIC_FETCH] Tidak ada items baru yang di-fetch atau ingest gagal.")
+                    print("[DYNAMIC_FETCH] Tidak ada items baru yang di-fetch atau ingest gagal.", file=sys.stderr)
             except Exception as e:
-                print(f"[ERROR] Dynamic fetch gagal: {e}")
+                print(f"[ERROR] Dynamic fetch gagal: {e}", file=sys.stderr)
+                traceback.print_exc(file=sys.stderr)
 
         # Handle kasus tidak ada neighbors
         if not neighbors:
             frontend = {
                 "claim": claim,
-                "label": "HOAX",
+                "label": "inconclusive",
                 "confidence": 0.0,
                 "summary": "Tidak ditemukan dokumen relevan untuk klaim ini setelah pencarian dan fetch otomatis.",
                 "conclusion": "Tidak ada bukti yang ditemukan.",
@@ -1206,34 +1261,35 @@ def verify_claim_local(claim: str, k: int = 5, dry_run: bool = False,
             print(json.dumps(frontend, ensure_ascii=False, indent=2))
             return {"_frontend_payload": frontend}
 
-        # Terjemahkan snippets untuk LLM
+        # Menerjemahkan snippets untuk LLM
         neighbors = translate_snippets_if_needed(neighbors, target_lang="Indonesian")
 
         if dry_run:
-            print("\n=== DRY RUN: Neighbors ===")
+            print("\n=== DRY RUN: Neighbors ===", file=sys.stderr)
             for i, n in enumerate(neighbors, 1):
                 relevance = n.get('relevance_score', 0)
-                print(f"\n[{i}] {n.get('safe_id')} (relevansi: {relevance:.3f})")
-                print(f"DOI: {n.get('doi', 'N/A')}")
-                print(f"Text: {n.get('_text_translated', n.get('text',''))[:400]}...")
+                print(f"\n[{i}] {n.get('safe_id')} (relevansi: {relevance:.3f})", file=sys.stderr)
+                print(f"DOI: {n.get('doi', 'N/A')}", file=sys.stderr)
+                print(f"Text: {n.get('_text_translated', n.get('text',''))[:400]}...", file=sys.stderr)
             return {"dry_run_neighbors": neighbors}
 
-        print(f"[3/6] Membuat prompt dengan {len(neighbors)} neighbors yang relevan...")
+        print(f"[3/6] Membuat prompt dengan {len(neighbors)} neighbors yang relevan...", file=sys.stderr)
         prompt = build_prompt(claim, neighbors, max_context_chars=3500)
 
-        print("[4/6] Memanggil LLM untuk verifikasi...")
+        print("[4/6] Memanggil LLM untuk verifikasi...", file=sys.stderr)
         try:
             raw_response = call_gemini(prompt, temperature=0.0, max_output_tokens=1600)
         except Exception as e:
-            print(f"[ERROR] call_gemini gagal: {e}")
+            print(f"[ERROR] call_gemini gagal: {e}", file=sys.stderr)
+            traceback.print_exc(file=sys.stderr)
             raw_response = ""
 
-        print("[5/6] Parsing hasil dari LLM...")
+        print("[5/6] Parsing hasil dari LLM...", file=sys.stderr)
         parsed = extract_json_from_text(raw_response) if raw_response else validate_and_normalize_result({})
 
-        print("[6/6] Memperkaya dengan metadata dan membuat frontend payload...")
+        print("[6/6] Memperkaya dengan metadata dan membuat frontend payload...", file=sys.stderr)
         
-        # Hitung metrics
+        # Menghitung metrics
         similarity_scores = [distance_to_similarity(n.get("distance")) for n in neighbors if n.get("distance") is not None]
         relevance_scores = [n.get("relevance_score", 0.0) for n in neighbors]
         
@@ -1243,7 +1299,7 @@ def verify_claim_local(claim: str, k: int = 5, dry_run: bool = False,
         
         combined_confidence = (0.5 * llm_confidence + 0.3 * relevance_mean + 0.2 * retriever_mean)
 
-        # Tambahkan metadata
+        # Menambahkan metadata
         parsed["_meta"] = {
             "neighbors_count": len(neighbors),
             "neighbors_with_doi": len([n for n in neighbors if n.get("doi")]),
@@ -1259,16 +1315,15 @@ def verify_claim_local(claim: str, k: int = 5, dry_run: bool = False,
         final_decision = decide_final_label_and_confidence(parsed, neighbors, combined_confidence)
         parsed.update(final_decision)
         
-        # Paksa label akhir (hanya VALID/HOAX)
+        # Memaksa label akhir (hanya VALID/HOAX)
         parsed["label"] = parsed["final_label"]
         parsed["confidence"] = parsed["final_confidence"]
 
         # Buat frontend payload
         frontend = build_frontend_payload(claim, parsed, neighbors)
 
-        # Simpan hasil verifikasi agar bisa di-ingest oleh backend / pipeline lain
+        # Menyimpan hasil verifikasi agar bisa di-ingest oleh backend / pipeline lain
         try:
-            # Sertakan metadata internal jika ada
             payload_to_save = {
                 "timestamp": int(time.time()),
                 "claim": frontend.get("claim"),
@@ -1277,7 +1332,7 @@ def verify_claim_local(claim: str, k: int = 5, dry_run: bool = False,
             }
             save_verification_result(payload_to_save)
         except Exception as e:
-            print(f"[SAVE_VERIF] Warning: gagal menyimpan payload: {e}")
+            print(f"[SAVE_VERIF] Warning: gagal menyimpan payload: {e}", file=sys.stderr)
 
         # Print JSON output dan return
         print("\n[JSON_OUTPUT]")
@@ -1286,9 +1341,24 @@ def verify_claim_local(claim: str, k: int = 5, dry_run: bool = False,
         return {"_frontend_payload": frontend}
 
     except Exception as e:
-        print(f"[ERROR] Exception dalam verify_claim_local: {str(e)}")
-        traceback.print_exc()
-        raise
+        error_msg = f"Exception dalam verify_claim_local: {str(e)}"
+        print(f"[ERROR] {error_msg}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        
+        # Return error response instead of raising
+        error_frontend = {
+            "claim": claim,
+            "label": "inconclusive",
+            "confidence": 0.0,
+            "summary": f"Error dalam verifikasi: {str(e)}",
+            "conclusion": "Terjadi kesalahan teknis saat memproses klaim.",
+            "evidence": [],
+            "references": [],
+            "metadata": {"error": error_msg}
+        }
+        print("\n[JSON_OUTPUT]")
+        print(json.dumps(error_frontend, ensure_ascii=False, indent=2))
+        return {"_frontend_payload": error_frontend}
 
 # -----------------------
 # CLI main function
@@ -1322,24 +1392,23 @@ def main():
 
     claim = args.claim
     if not claim:
-        print("Masukkan klaim (akhiri dengan ENTER): ")
+        print("Masukkan klaim (akhiri dengan ENTER): ", file=sys.stderr)
         claim = input("> ").strip()
 
     if not claim:
-        print("Error: Klaim tidak boleh kosong")
+        print("Error: Klaim tidak boleh kosong", file=sys.stderr)
         sys.exit(1)
 
     if args.enable_prefetch:
-        # Generate query variations dan optionally fetch
         queries = generate_bilingual_queries(claim, langs=["English"])
-        print(f"[MAIN] Generated queries untuk fetch: {queries}")
+        print(f"[MAIN] Generated queries untuk fetch: {queries}", file=sys.stderr)
 
         for q in queries:
             try:
-                print(f"[MAIN] Fetching untuk expanded query: {q}")
+                print(f"[MAIN] Fetching untuk expanded query: {q}", file=sys.stderr)
                 fetch_all_sources(q, pubmed_max=5, crossref_rows=5, semantic_limit=5, delay_between_sources=0.3)
             except Exception as e:
-                print(f"[MAIN] fetch_all_sources gagal untuk '{q}': {e}")
+                print(f"[MAIN] fetch_all_sources gagal untuk '{q}': {e}", file=sys.stderr)
 
     try:
         result = verify_claim_local(
@@ -1352,39 +1421,40 @@ def main():
             debug_retrieval=args.debug_retrieval
         )
     except Exception as e:
-        print(f"\n❌ Gagal verifikasi klaim: {str(e)}")
+        print(f"\n❌ Gagal verifikasi klaim: {str(e)}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         sys.exit(1)
 
     # Print ringkasan yang user-friendly
-    print("\n" + "="*60)
-    print("HASIL VERIFIKASI (ringkasan untuk pengguna)")
-    print("="*60)
+    print("\n" + "="*60, file=sys.stderr)
+    print("HASIL VERIFIKASI (ringkasan untuk pengguna)", file=sys.stderr)
+    print("="*60, file=sys.stderr)
 
     frontend = result.get("_frontend_payload") if isinstance(result, dict) else None
     if frontend:
-        print(f"\n📋 KLAIM: {frontend.get('claim')}")
-        print(f"\n🏷️  LABEL: {frontend.get('label')}")
-        print(f"📊 CONFIDENCE: {frontend.get('confidence'):.2%}")
-        print(f"\n💡 RINGKASAN:\n{frontend.get('summary','')}")
-        print(f"\n🔍 KESIMPULAN:\n{frontend.get('conclusion','')}")
+        print(f"\n📋 KLAIM: {frontend.get('claim')}", file=sys.stderr)
+        print(f"\n🏷️  LABEL: {frontend.get('label')}", file=sys.stderr)
+        print(f"📊 CONFIDENCE: {frontend.get('confidence'):.2%}", file=sys.stderr)
+        print(f"\n💡 RINGKASAN:\n{frontend.get('summary','')}", file=sys.stderr)
+        print(f"\n🔍 KESIMPULAN:\n{frontend.get('conclusion','')}", file=sys.stderr)
         
         metadata = frontend.get("metadata", {})
         if metadata:
-            print(f"\n📈 METADATA:")
-            print(f"   - Neighbors yang diambil: {metadata.get('neighbors_count', 0)}")
-            print(f"   - Neighbors dengan DOI: {metadata.get('neighbors_with_doi', 0)}")
-            print(f"   - Mean relevance score: {metadata.get('relevance_mean', 0):.3f}")
-            print(f"   - Mean similarity score: {metadata.get('retriever_mean_similarity', 0):.3f}")
-            print(f"   - Combined confidence: {metadata.get('combined_confidence', 0):.2%}")
+            print(f"\n📈 METADATA:", file=sys.stderr)
+            print(f"   - Neighbors yang diambil: {metadata.get('neighbors_count', 0)}", file=sys.stderr)
+            print(f"   - Neighbors dengan DOI: {metadata.get('neighbors_with_doi', 0)}", file=sys.stderr)
+            print(f"   - Mean relevance score: {metadata.get('relevance_mean', 0):.3f}", file=sys.stderr)
+            print(f"   - Mean similarity score: {metadata.get('retriever_mean_similarity', 0):.3f}", file=sys.stderr)
+            print(f"   - Combined confidence: {metadata.get('combined_confidence', 0):.2%}", file=sys.stderr)
 
     if args.save_json and frontend:
         with open(args.save_json, "w", encoding="utf-8") as fo:
             json.dump(frontend, fo, ensure_ascii=False, indent=2)
-        print(f"\n💾 Hasil disimpan ke: {args.save_json}")
+        print(f"\n💾 Hasil disimpan ke: {args.save_json}", file=sys.stderr)
 
-    print("\n" + "="*60)
-    print("✅ Selesai.")
-    print("="*60)
+    print("\n" + "="*60, file=sys.stderr)
+    print("✅ Selesai.", file=sys.stderr)
+    print("="*60, file=sys.stderr)
 
 
 if __name__ == "__main__":

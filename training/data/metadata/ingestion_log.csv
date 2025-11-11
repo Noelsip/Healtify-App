@@ -1043,3 +1043,39 @@ timestamp,source,query,file,status,notes
 2025-11-11T14:16:06.002042+00:00,pubmed,Onani dapat membuat mandul,,no results,No articles found for the given query.
 2025-11-11T14:16:08.056850+00:00,crossref,Onani dapat membuat mandul,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_Onani_dapat_membuat_mandul_1762870568.json,success,30 articles retrieved.
 2025-11-11T14:16:20.760363+00:00,semantic_scholar,Onani dapat membuat mandul,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\semantic_scholar_Onani_dapat_membuat_mandul_1762870580.json,success,"search_returned:17, details_returned:0"
+2025-11-11T17:16:43.132434+00:00,pubmed,"Original Claim: Onani dapat membuat mandul
+
+Additional Evidence from Dispute:
+Reason: Hasil verifikasi tidak akurat karena tidak mempertimbangkan studi terbaru dari tahun 2024 yang menunjukkan hasil berbeda. Studi tersebut dipublikasikan di Nature Medicine dengan DOI 10.1038/s41591-024-12345.
+Supporting DOI: 10.1038/s41591-024-12345
+Supporting URL: https://www.nature.com/articles/s41591-024-1212",,no results,No articles found for the given query.
+2025-11-11T17:16:45.240598+00:00,crossref,"Original Claim: Onani dapat membuat mandul
+
+Additional Evidence from Dispute:
+Reason: Hasil verifikasi tidak akurat karena tidak mempertimbangkan studi terbaru dari tahun 2024 yang menunjukkan hasil berbeda. Studi tersebut dipublikasikan di Nature Medicine dengan DOI 10.1038/s41591-024-12345.
+Supporting DOI: 10.1038/s41591-024-12345
+Supporting URL: https://www.nature.com/articles/s41591-024-1212",C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_Original_Claim_Onani_dapat_membuat_mandulAdditional_Evidence_from_DisputeReason_Hasil_verifikasi_tidak_akurat_karena_tidak_mempertimbangkan_studi_terbaru_dari_tahun_2024_yang_menunjukkan_hasil_berbeda_1762881405.json,success,30 articles retrieved.
+2025-11-11T17:16:46.367963+00:00,semantic_scholar,"Original Claim: Onani dapat membuat mandul
+
+Additional Evidence from Dispute:
+Reason: Hasil verifikasi tidak akurat karena tidak mempertimbangkan studi terbaru dari tahun 2024 yang menunjukkan hasil berbeda. Studi tersebut dipublikasikan di Nature Medicine dengan DOI 10.1038/s41591-024-12345.
+Supporting DOI: 10.1038/s41591-024-12345
+Supporting URL: https://www.nature.com/articles/s41591-024-1212",,no results,No articles found for the given query.
+2025-11-11T17:17:32.245900+00:00,pubmed,"Original Claim: Onani dapat membuat mandul
+
+Additional Evidence from Dispute:
+Reason: Hasil verifikasi tidak akurat karena tidak mempertimbangkan studi terbaru dari tahun 2024 yang menunjukkan hasil berbeda. Studi tersebut dipublikasikan di Nature Medicine dengan DOI 10.1038/s41591-024-12345.
+Supporting DOI: 10.1038/s41591-024-12345
+Supporting URL: https://www.nature.com/articles/s41591-024-1212",,no results,No articles found for the given query.
+2025-11-11T17:17:34.980540+00:00,crossref,"Original Claim: Onani dapat membuat mandul
+
+Additional Evidence from Dispute:
+Reason: Hasil verifikasi tidak akurat karena tidak mempertimbangkan studi terbaru dari tahun 2024 yang menunjukkan hasil berbeda. Studi tersebut dipublikasikan di Nature Medicine dengan DOI 10.1038/s41591-024-12345.
+Supporting DOI: 10.1038/s41591-024-12345
+Supporting URL: https://www.nature.com/articles/s41591-024-1212",C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_Original_Claim_Onani_dapat_membuat_mandulAdditional_Evidence_from_DisputeReason_Hasil_verifikasi_tidak_akurat_karena_tidak_mempertimbangkan_studi_terbaru_dari_tahun_2024_yang_menunjukkan_hasil_berbeda_1762881454.json,success,30 articles retrieved.
+2025-11-11T17:17:36.532210+00:00,semantic_scholar,"Original Claim: Onani dapat membuat mandul
+
+Additional Evidence from Dispute:
+Reason: Hasil verifikasi tidak akurat karena tidak mempertimbangkan studi terbaru dari tahun 2024 yang menunjukkan hasil berbeda. Studi tersebut dipublikasikan di Nature Medicine dengan DOI 10.1038/s41591-024-12345.
+Supporting DOI: 10.1038/s41591-024-12345
+Supporting URL: https://www.nature.com/articles/s41591-024-1212",,no results,No articles found for the given query.

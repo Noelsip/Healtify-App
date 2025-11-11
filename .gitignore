@@ -65,3 +65,5 @@ cache/
 /training/data/txt/*.txt
 /training/scripts/__pycache__/
 /training/scripts/*.pyc
+
+training/docker-compose.yml

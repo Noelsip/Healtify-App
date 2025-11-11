@@ -7,6 +7,7 @@ from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.db import transaction, models
+from django.http import Http404
 
 from .models import Claim, VerificationResult, Source, ClaimSource, Dispute
 from .serializers import (
@@ -426,15 +427,26 @@ class DisputeAdminListView(APIView):
 class DisputeAdminActionView(APIView):
     """
     POST endpoint untuk admin approve/reject dispute.
-    Jika approved, akan update verification result dari claim terkait.
+    Jika approved, akan re-verify claim dengan AI dan update verification result.
     """
-    permission_classes = [IsAuthenticated, IsAdminUser]  # ✅ AKTIF
+    permission_classes = [IsAuthenticated, IsAdminUser]
 
     def post(self, request, dispute_id):
         logger.info(f"[DISPUTE_ADMIN_ACTION] Admin action on dispute {dispute_id} from {request.META.get('REMOTE_ADDR', 'unknown')}")
 
         try:
-            dispute = get_object_or_404(Dispute, id=dispute_id)
+            # ✅ Improved error handling untuk dispute not found
+            try:
+                dispute = Dispute.objects.get(id=dispute_id)
+            except Dispute.DoesNotExist:
+                logger.warning(f"[DISPUTE_ADMIN_ACTION] Dispute {dispute_id} not found")
+                return Response(
+                    {
+                        'error': 'Dispute tidak ditemukan.',
+                        'detail': f'Dispute dengan ID {dispute_id} tidak ada di database.'
+                    },
+                    status=status.HTTP_404_NOT_FOUND
+                )
 
             if dispute.reviewed:
                 logger.warning(f"[DISPUTE_ADMIN_ACTION] Dispute {dispute_id} already reviewed")
@@ -455,89 +467,206 @@ class DisputeAdminActionView(APIView):
             logger.info(f"[DISPUTE_ADMIN_ACTION] Action: {action}, Reviewed by: {reviewed_by}")
 
             with transaction.atomic():
-                if dispute.claim:
-                    try:
-                        original_verification = dispute.claim.verification_result
-                        dispute.original_label = original_verification.label
-                        dispute.original_confidence = original_verification.confidence
-                    except VerificationResult.DoesNotExist:
-                        pass
+                # Update dispute status
+                if action == 'approve':
+                    dispute.status = Dispute.STATUS_APPROVED
+                    logger.info(f"[DISPUTE_ADMIN_ACTION] Dispute {dispute_id} approved")
+                    
+                    # Jika ada claim terkait, re-verify dengan AI
+                    if dispute.claim:
+                        logger.info(f"[DISPUTE_ADMIN_ACTION] Re-verifying claim {dispute.claim.id} with AI")
+                        self._reverify_claim_with_ai(dispute.claim, validated_data=serializer.validated_data, dispute=dispute)
+                    else:
+                        logger.warning(f"[DISPUTE_ADMIN_ACTION] No claim linked to dispute {dispute_id}")
+                        
+                elif action == 'reject':
+                    dispute.status = Dispute.STATUS_REJECTED
+                    logger.info(f"[DISPUTE_ADMIN_ACTION] Dispute {dispute_id} rejected")
+                    
+                    # Update claim status back to done jika sebelumnya disputed
+                    if dispute.claim and dispute.claim.status == Claim.STATUS_DISPUTED:
+                        dispute.claim.status = Claim.STATUS_DONE
+                        dispute.claim.save()
+                        logger.info(f"[DISPUTE_ADMIN_ACTION] Restored claim {dispute.claim.id} status to DONE")
 
+                # Update dispute review info
                 dispute.reviewed = True
-                dispute.reviewed_at = timezone.now()
                 dispute.review_note = review_note
                 dispute.reviewed_by = reviewed_by
-                dispute.status = Dispute.STATUS_APPROVED if action == 'approve' else Dispute.STATUS_REJECTED
+                dispute.reviewed_at = timezone.now()
                 dispute.save()
 
-                logger.info(f"[DISPUTE_ADMIN_ACTION] Dispute {dispute_id} marked as {dispute.status}")
-
-                if action == 'approve' and dispute.claim:
-                    self._update_claim_verification(
-                        dispute.claim,
-                        serializer.validated_data,
-                        dispute
-                    )
-                    logger.info(f"[DISPUTE_ADMIN_ACTION] Updated verification for claim {dispute.claim.id}")
+                logger.info(f"[DISPUTE_ADMIN_ACTION] Dispute {dispute_id} processed successfully")
 
             response_data = DisputeDetailSerializer(dispute).data
             return Response(response_data, status=status.HTTP_200_OK)
 
+        except Http404:
+            # Handle Django's Http404 explicitly
+            logger.warning(f"[DISPUTE_ADMIN_ACTION] Dispute {dispute_id} not found (Http404)")
+            return Response(
+                {
+                    'error': 'Dispute tidak ditemukan.',
+                    'detail': f'Dispute dengan ID {dispute_id} tidak ada di database.'
+                },
+                status=status.HTTP_404_NOT_FOUND
+            )
         except Exception as e:
-            logger.error(f"[DISPUTE_ADMIN_ACTION] Error: {str(e)}", exc_info=True)
+            logger.error(f"[DISPUTE_ADMIN_ACTION] Unexpected error: {str(e)}", exc_info=True)
             return Response(
                 {'error': f'Gagal memproses action: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-    def _update_claim_verification(self, claim, validated_data, dispute):
-        """Helper method untuk update verification result dari claim."""
+    def _reverify_claim_with_ai(self, claim, validated_data, dispute):
+        """
+        Re-verify claim dengan AI untuk mendapatkan confidence score yang baru.
+        Menggunakan supporting evidence dari dispute jika ada.
+        """
         try:
-            verification = claim.verification_result
+            logger.info(f"[REVERIFY] Starting AI re-verification for claim {claim.id}")
+            
+            # Ambil verification result yang ada
+            try:
+                verification = claim.verification_result
+                original_label = verification.label
+                original_confidence = verification.confidence
+            except VerificationResult.DoesNotExist:
+                logger.warning(f"[REVERIFY] No existing verification for claim {claim.id}")
+                verification = None
+                original_label = None
+                original_confidence = None
 
-            new_label = validated_data.get('new_label')
-            new_confidence = validated_data.get('new_confidence')
-            new_summary = validated_data.get('new_summary')
+            # Simpan original values ke dispute
+            dispute.original_label = original_label
+            dispute.original_confidence = original_confidence
+            dispute.save(update_fields=['original_label', 'original_confidence'])
 
-            if new_label:
-                verification.label = new_label
-                logger.debug(f"[UPDATE_VERIFICATION] New label: {new_label}")
+            # Build context untuk AI dengan evidence dari dispute
+            claim_context = self._build_dispute_context(claim, dispute)
+            
+            logger.info(f"[REVERIFY] Calling AI verification for claim {claim.id}")
+            
+            # Panggil AI adapter untuk re-verify
+            ai_result = ai_adapter.call_ai_verify(claim_context)
+            
+            logger.info(f"[REVERIFY] AI verification completed. Label: {ai_result.get('label')}, Confidence: {ai_result.get('confidence')}")
 
-            if new_confidence is not None:
-                verification.confidence = new_confidence
-                logger.debug(f"[UPDATE_VERIFICATION] New confidence: {new_confidence}")
+            # Update atau create verification result dengan hasil AI
+            if verification:
+                # Update existing verification
+                verification.label = ai_result.get('label', verification.label)
+                verification.confidence = ai_result.get('confidence', verification.confidence)
+                verification.summary = ai_result.get('summary', verification.summary)
+                
+                # Tambahkan reviewer note
+                reviewer_note = (
+                    f"[UPDATED AFTER DISPUTE #{dispute.id}]\n"
+                    f"Reviewed by: {dispute.reviewed_by}\n"
+                    f"Review note: {dispute.review_note or 'No note provided'}\n"
+                    f"Supporting evidence: {dispute.supporting_doi or dispute.supporting_url or 'See attached file'}\n"
+                    f"---\n"
+                    f"AI re-verification result:\n"
+                    f"Previous: {original_label} (confidence: {original_confidence:.2%})\n"
+                    f"Updated: {verification.label} (confidence: {verification.confidence:.2%})\n"
+                )
+                
+                if verification.reviewer_notes:
+                    verification.reviewer_notes = f"{reviewer_note}\n---\nPrevious notes:\n{verification.reviewer_notes}"
+                else:
+                    verification.reviewer_notes = reviewer_note
+                    
+                verification.save()
+                logger.info(f"[REVERIFY] Updated verification result for claim {claim.id}")
+                
+            else:
+                # Create new verification result
+                verification = VerificationResult.objects.create(
+                    claim=claim,
+                    label=ai_result.get('label', 'inconclusive'),
+                    summary=ai_result.get('summary', ''),
+                    confidence=ai_result.get('confidence', 0.0),
+                    reviewer_notes=f"Created after dispute #{dispute.id} approval by {dispute.reviewed_by}"
+                )
+                logger.info(f"[REVERIFY] Created new verification result for claim {claim.id}")
 
-            if new_summary:
-                verification.summary = new_summary
-                logger.debug(f"[UPDATE_VERIFICATION] New summary length: {len(new_summary)}")
+            # Update sources dari AI result jika ada
+            sources_data = ai_result.get('sources', [])
+            if sources_data:
+                logger.info(f"[REVERIFY] Processing {len(sources_data)} sources from AI")
+                self._update_claim_sources(claim, sources_data)
 
-            reviewer_note = (
-                f"Verification updated based on approved dispute #{dispute.id}. "
-                f"Reviewed by: {dispute.reviewed_by}. "
-            )
-            if dispute.review_note:
-                reviewer_note += f"Admin note: {dispute.review_note}"
-
-            verification.reviewer_notes = reviewer_note
-            verification.save()
-
+            # Update claim status
             claim.status = Claim.STATUS_DONE
             claim.save()
+            
+            logger.info(f"[REVERIFY] Successfully re-verified claim {claim.id}")
 
-            logger.info(f"[UPDATE_VERIFICATION] Successfully updated claim {claim.id}")
-
-        except VerificationResult.DoesNotExist:
-            logger.warning(f"[UPDATE_VERIFICATION] No verification result for claim {claim.id}")
-            if validated_data.get('new_label'):
-                VerificationResult.objects.create(
-                    claim=claim,
-                    label=validated_data['new_label'],
-                    confidence=validated_data.get('new_confidence', 0.5),
-                    summary=validated_data.get('new_summary', ''),
-                    reviewer_notes=f"Created from approved dispute #{dispute.id}"
+        except Exception as e:
+            logger.error(f"[REVERIFY] Error re-verifying claim {claim.id}: {str(e)}", exc_info=True)
+            # Jangan raise error, biar dispute tetap bisa di-approve
+            # Tapi log errornya untuk investigation
+            if verification:
+                verification.reviewer_notes = (
+                    f"{verification.reviewer_notes or ''}\n\n"
+                    f"[ERROR] AI re-verification failed: {str(e)}"
                 )
-                logger.info(f"[UPDATE_VERIFICATION] Created new verification for claim {claim.id}")
+                verification.save()
 
+    def _build_dispute_context(self, claim, dispute) -> str:
+        """
+        Build context string untuk AI verification dengan evidence dari dispute.
+        """
+        context_parts = [
+            f"Original Claim: {claim.text}",
+            "",
+            "Additional Evidence from Dispute:",
+        ]
+        
+        if dispute.reason:
+            context_parts.append(f"Reason: {dispute.reason}")
+        
+        if dispute.supporting_doi:
+            context_parts.append(f"Supporting DOI: {dispute.supporting_doi}")
+            
+        if dispute.supporting_url:
+            context_parts.append(f"Supporting URL: {dispute.supporting_url}")
+            
+        if dispute.supporting_file:
+            context_parts.append(f"Supporting File: {dispute.supporting_file.name}")
+        
+        return "\n".join(context_parts)
+
+    def _update_claim_sources(self, claim, sources_data):
+        """Update sources untuk claim berdasarkan AI result."""
+        try:
+            # Clear existing sources
+            ClaimSource.objects.filter(claim=claim).delete()
+            
+            for idx, src_data in enumerate(sources_data, start=1):
+                # Get or create source
+                source_obj, created = Source.objects.get_or_create(
+                    doi=src_data.get('doi', ''),
+                    defaults={
+                        'title': src_data.get('title', ''),
+                        'url': src_data.get('url', ''),
+                        'authors': src_data.get('authors', ''),
+                        'publisher': src_data.get('publisher', ''),
+                    }
+                )
+                
+                # Create claim-source relation
+                ClaimSource.objects.create(
+                    claim=claim,
+                    source=source_obj,
+                    relevance_score=src_data.get('relevance_score', 0.0),
+                    rank=idx
+                )
+            
+            logger.info(f"[UPDATE_SOURCES] Updated {len(sources_data)} sources for claim {claim.id}")
+            
+        except Exception as e:
+            logger.error(f"[UPDATE_SOURCES] Error updating sources: {str(e)}", exc_info=True)
 
 class DisputeStatsView(APIView):
     """
@@ -568,3 +697,16 @@ class DisputeStatsView(APIView):
                 {'error': 'Gagal mengambil statistik.'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+class DisputeValidIdsView(APIView):
+    """
+    GET endpoint untuk melihat dispute IDs yang valid (untuk debugging).
+    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
+
+    def get(self, request):
+        disputes = Dispute.objects.all().values('id', 'status', 'reviewed', 'created_at')
+        return Response({
+            'total': disputes.count(),
+            'disputes': list(disputes)
+        }, status=status.HTTP_200_OK)

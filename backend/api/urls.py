@@ -9,6 +9,7 @@ from .views import (
     DisputeAdminListView,
     DisputeAdminActionView,
     DisputeStatsView,
+    DisputeValidIdsView
 )
 from .auth_views import (
     AdminLoginView, 
@@ -48,4 +49,5 @@ urlpatterns = [
     path('admin/disputes/', DisputeAdminListView.as_view(), name='admin-dispute-list'),
     path('admin/disputes/<int:dispute_id>/action/', DisputeAdminActionView.as_view(), name='admin-dispute-action'),
     path('admin/disputes/stats/', DisputeStatsView.as_view(), name='admin-dispute-stats'),
+    path('admin/disputes/valid-ids/', DisputeValidIdsView.as_view(), name='admin-dispute-valid-ids'),  
 ]

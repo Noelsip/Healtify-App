@@ -152,7 +152,6 @@ class DisputeAdminActionSerializer(serializers.Serializer):
     review_note = serializers.CharField(required=False, allow_blank=True, max_length=2000)
     reviewed_by = serializers.CharField(max_length=255)
 
-    # untuk approved dispute
     new_label = serializers.ChoiceField(
         choices=[
             ('true', 'True'),
@@ -164,5 +163,14 @@ class DisputeAdminActionSerializer(serializers.Serializer):
         required=False,
         allow_null=True
     )
-    new_confidence = serializers.FloatField(required=False, allow_null=True, min_value=0.0, max_value=1.0)
-    new_summary = serializers.CharField(required=False, allow_blank=True, max_length=5000)
+    new_confidence = serializers.FloatField(
+        required=False, 
+        allow_null=True, 
+        min_value=0.0, 
+        max_value=1.0
+    )
+    new_summary = serializers.CharField(
+        required=False, 
+        allow_blank=True, 
+        max_length=5000
+    )

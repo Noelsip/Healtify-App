@@ -19,7 +19,6 @@ pandas
 numpy
 tqdm
 python-dotenv
-flask
 
 # pdf
 pymupdf

@@ -25,6 +25,7 @@ frontend/dist/
 frontend/build/
 frontend/.vite/
 frontend/coverage/
+frontend/*json
 
 # Frontend logs
 frontend/npm-debug.log*

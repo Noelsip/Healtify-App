@@ -1,4 +1,4 @@
-const API_BASE_URL = import.meta.env.API_BASE_URL ||'http://localhost:8000/api';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ||'http://localhost:8000/api';
 
 // Handle API response dan error
 const handleResponse = async (response) => {
@@ -16,6 +16,7 @@ const handleResponse = async (response) => {
 
 export const verifyClaim = async (claimText) => {
   try {
+    console.log('API URL:', API_BASE_URL); // Debugging line
     const response = await fetch(`${API_BASE_URL}/verify/`, {
       method: 'POST',
       headers: {
@@ -31,16 +32,70 @@ export const verifyClaim = async (claimText) => {
   }
 };
 
+/**
+ * GET Claim Detail by ID
+ * GET /api/claims/{id}
+ * @param {number} 
+ * @returns {Promise}
+ */
+
+export const getClaimDetail = async (claimId) => {
+    try {
+        const response = await fetch(`${API_BASE_URL}/claims/${claimId}`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        });
+
+        return await handleResponse(response);
+    } catch (error) {
+        console.error('Error fetching claim detail:', error);
+        throw error;
+    }
+};
+
+/** 
+ * GET ALL Claims (HISTORY)
+ * GET /api/claims
+ * @returns {Promise}
+ */
+export const getAllClaims = async () => {
+    try {
+        const response = await fetch(`${API_BASE_URL}/claims/`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        });
+
+        return await handleResponse(response);
+    } catch (error) {
+        console.error('Error fetching all claims:', error);
+        throw error;
+    }
+};
+
+
+/** * Create Dispute
+ * POST /api/disputes/create
+ * @param {Object} disputeData
+ * @returns {Promise}
+ */
+export
 const createDispute = async (disputeData) => {
     try {
         const formData = new FormData();
 
+        // Menambahkan claim_id atau claim_text
         if (disputeData.claim_id) {
             formData.append('claim_id', disputeData.claim_id);
         }
         if (disputeData.claim_text) {
             formData.append('claim_text', disputeData.claim_text);
         }
+
+        // Data wajib
         formData.append('reason', disputeData.reason);
         formData.append('reporter_name', disputeData.reporter_name || '');
         formData.append('reporter_email', disputeData.reporter_email || '');
@@ -55,9 +110,9 @@ const createDispute = async (disputeData) => {
             formData.append('supporting_url', disputeData.supporting_url);
         }
 
-        const response = await fetch(`${API_BASE_URL}/disputes/create`, {
+        const response = await fetch(`${API_BASE_URL}/disputes/create/`, {
             method: 'POST',
-            body: formData
+            body: formData,
         });
 
         return await handleResponse(response);
@@ -70,5 +125,7 @@ const createDispute = async (disputeData) => {
 export default{
     verifyClaim, 
     handleResponse,
-    createDispute
+    createDispute,
+    getClaimDetail,
+    getAllClaims
 };

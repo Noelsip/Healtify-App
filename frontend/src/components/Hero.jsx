@@ -3,11 +3,12 @@ import { useState } from "react";
 import { useTranslation } from 'react-i18next';
 import { copyToClipboard, shareContent } from '../utils/shareUtils';
 import { verifyClaim } from "../services/api";
+import Toast from './Toast'
 
 const Hero = () => {
     const { t } = useTranslation();
-    const [notification, setNotification] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
+    const [toast, setToast] = useState(null);
 
     // State untuk menampung hasil verifikasi
     const [verificationResult, setVerificationResult] = useState(null);
@@ -22,10 +23,9 @@ const Hero = () => {
      * Menampilkan Notifikasi toast
      */
 
-    function showNotification(message) {
-        setNotification(message);
-        setTimeout(() => setNotification(''), 3000);
-    }
+    const showToast = (message, type = 'success') => { 
+        setToast({ message, type });
+    };
 
     /**
      * Handle Share Button
@@ -33,12 +33,14 @@ const Hero = () => {
     const handleShare = async () => {
         const result = await shareContent({
             title: 'Healthify - ' + t('hero.desc'),
-            text: t('hero.subtitle'),
+            text: generateShareText(verificationResult),
             url: window.location.href
         });
         
         if (result.success) {
-            showNotification(t('actions.shareSuccess'));
+            showToast(t('actions.shareSuccess'), 'success');
+        } else {
+            showToast(t('actions.shareFailed'), 'error');
         }
     };
 
@@ -47,7 +49,7 @@ const Hero = () => {
      */
     const handleCopy = async () => {
         if (!verificationResult) {
-            showNotification(t('actions.nothingToCopy'));
+            showToast('No verification result to copy', 'warning');
             return;
         }
 
@@ -55,9 +57,9 @@ const Hero = () => {
         const result = await copyToClipboard(copyText);
         
         if (result.success) {
-            showNotification(t('actions.copied'));
-        } else{
-            showNotification(t('actions.copyFailed'));
+            showToast(t('actions.copied'), 'success');
+        } else {
+            showToast(t('actions.copyFailed'), 'error');
         }
     };
 
@@ -126,33 +128,30 @@ const Hero = () => {
      */
     const handleSearch = async (e) => {
         e.preventDefault();
-        
-        // Validasi Input
+
         if (!searchQuery.trim()) {
-            setError(t('Please Enteer a claim to verify.'));
+            showToast('Please enter a claim to verify', 'warning');
             return;
         }
-        
-        // Reset error dan mulai loading
+
+        setIsLoading(true);
         setError(null);
         setVerificationResult(null);
-        setIsLoading(true);
 
         try {
-            // Memanggil API verifyClaim
             const result = await verifyClaim(searchQuery);
-
-            console.log('Verification Result:', result);
-
-            // Simpan hasil verifikasi ke state
             setVerificationResult(result);
-
-            // Menampilkan notifikasi sukses
-            showNotification(t('Verification completed successfully.'));
-        } catch (error) {
-            console.error('Verification Error:', error);
-            setError(error.message || 'Failed to verify the claim. Please try again.');
-            setVerificationResult(null);
+            
+            // Show success toast dengan label
+            const label = formatLabel(result.verification_result?.label).text;
+            showToast(`✓ Verification complete! Result: ${label}`, 'success');
+            
+            console.log('Verification result:', result);
+        } catch (err) {
+            console.error('Verification error:', err);
+            const errorMessage = err.message || 'Failed to verify claim. Please try again.';
+            setError(errorMessage);
+            showToast('Verification failed. Please try again.', 'error');
         } finally {
             setIsLoading(false);
         }
@@ -380,11 +379,13 @@ const Hero = () => {
                 </div>
             )}
 
-            {/* Notification Toast */}
-            {notification && (
-                <div className="fixed bottom-4 sm:bottom-6 right-4 sm:right-6 left-4 sm:left-auto bg-green-500 text-white px-4 sm:px-6 py-3 rounded-lg shadow-lg animate-fade-in z-50 text-sm sm:text-base max-w-sm">
-                    {notification}
-                </div>
+            {/* Toast Notification */}
+            {toast && (
+                <Toast 
+                    message={toast.message}
+                    type={toast.type}
+                    onClose={() => setToast(null)}
+                />
             )}
         </section>
     );

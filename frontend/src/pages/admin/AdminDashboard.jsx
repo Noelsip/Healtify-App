@@ -1,6 +1,6 @@
-import { Activity } from "react";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import Toast from '../../components/Toast';
 
 const BASE_URL = 'http://localhost:8000/api';
 
@@ -9,6 +9,7 @@ const AdminDashboard = () => {
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
+    const [toast, setToast] = useState(null);
     const [stats, setStats] = useState({
         total_claims: 0,
         pending_claims: 0,
@@ -16,6 +17,10 @@ const AdminDashboard = () => {
         rejected_claims: 0
     });
     const [recentActivity, setRecentActivity] = useState([]);
+
+    const showToast = (message, type = 'success') => {
+        setToast({ message, type });
+    };
 
     useEffect(() => {
         const token = localStorage.getItem('adminToken');
@@ -71,13 +76,27 @@ const AdminDashboard = () => {
                     'Content-Type': 'application/json'
                 }
             });
+
+            // Show logout success message
+            showToast('Successfully logged out. See you soon! 👋', 'success');
+
+            // Clear storage and redirect after delay
+            setTimeout(() => {
+                localStorage.removeItem('adminToken');
+                localStorage.removeItem('adminRefreshToken');
+                localStorage.removeItem('adminUser');
+                navigate('/admin/login');
+            }, 1500);
         } catch (error) {
             console.error('Error during logout:', error);
-        } finally {
-            localStorage.removeItem('adminToken');
-            localStorage.removeItem('adminRefreshToken');
-            localStorage.removeItem('adminUser');
-            navigate('/admin/login');
+            // Still logout even if request fails
+            showToast('Logged out successfully', 'success');
+            setTimeout(() => {
+                localStorage.removeItem('adminToken');
+                localStorage.removeItem('adminRefreshToken');
+                localStorage.removeItem('adminUser');
+                navigate('/admin/login');
+            }, 1500);
         }
     };
 
@@ -94,9 +113,9 @@ const AdminDashboard = () => {
 
     if (loading) {
         return (
-            <div className="flex item-center justify-center min-h-screen">
+            <div className="flex items-center justify-center min-h-screen">
                 <div className="text-center">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
                     <p className="text-gray-600">Loading dashboard...</p>
                 </div>
             </div>
@@ -115,12 +134,21 @@ const AdminDashboard = () => {
 
     return (
         <div className="min-h-screen bg-gray-50">
+            {/* Toast Notification */}
+            {toast && (
+                <Toast 
+                    message={toast.message}
+                    type={toast.type}
+                    onClose={() => setToast(null)}
+                />
+            )}
+
             {/* Header */}
             <header className="bg-white shadow-sm">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
                     <div className="flex justify-between items-center">
                         <div>
-                            <h1 className="text-2xl font-bold text-green-900">
+                            <h1 className="text-2xl font-bold text-gray-900">
                                 Admin Dashboard
                             </h1>
                             <p className="text-sm text-gray-600">
@@ -137,9 +165,9 @@ const AdminDashboard = () => {
                 </div>
             </header>
 
-            {/* Main Content */}
+            {/* Rest of dashboard content... */}
             <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-                {/* Stats Card */}
+                {/* Stats Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
                     <StatCard 
                         title="Total Claims"
@@ -148,7 +176,7 @@ const AdminDashboard = () => {
                         color="blue"
                     />
                     <StatCard 
-                        title="Pending Dispute"
+                        title="Pending Disputes"
                         value={stats.pending_disputes}
                         icon="⏳"
                         color="yellow"
@@ -167,9 +195,9 @@ const AdminDashboard = () => {
                     />
                 </div>
 
-                {/* Quick Action */}
+                {/* Quick Actions */}
                 <div className="bg-white rounded-lg shadow p-6 mb-8">
-                    <h2 className="text-xl font-semibold mb-4">Quick Action</h2>
+                    <h2 className="text-xl font-semibold mb-4">Quick Actions</h2>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <ActionButton 
                             label="Manage Claims"
@@ -198,7 +226,7 @@ const AdminDashboard = () => {
                     {recentActivity.length === 0 ? (
                         <p className="text-gray-500 text-center py-8">No recent activity.</p>
                     ) : (
-                        <div>
+                        <div className="space-y-3">
                             {recentActivity.map((activity, index) => (
                                 <ActivityItem
                                     key={index}
@@ -209,7 +237,7 @@ const AdminDashboard = () => {
                             ))}
                         </div>
                     )}
-                    </div>
+                </div>
             </main>
         </div>
     );
@@ -240,14 +268,14 @@ const StatCard = ({ title, value, icon, color }) => {
 };
 
 // Action Button Component
-const ActionButton = ({ title, description, icon, onClick }) => {
+const ActionButton = ({ label, description, icon, onClick }) => {
     return (
         <button
             onClick={onClick}
             className="bg-gray-50 hover:bg-gray-100 rounded-lg p-4 text-left transition border border-gray-200"
         >
             <div className="text-3xl mb-2">{icon}</div>
-            <h3 className="font-semibold text-gray-900 mb-1">{title}</h3>
+            <h3 className="font-semibold text-gray-900 mb-1">{label}</h3>
             <p className="text-sm text-gray-600">{description}</p>
         </button>
     );
@@ -262,11 +290,11 @@ const ActivityItem = ({ text, time, type }) => {
     };
 
     return (
-        <div className="flex items-start space-x-3 pb-4 border-b border-gray-100 last:border-0">
+        <div className="flex items-start space-x-3 pb-3 border-b border-gray-100 last:border-0">
             <div className="text-xl">{iconMap[type] || '📌'}</div>
             <div className="flex-1">
-                <p className="text-gray-900">{text}</p>
-                <p className="text-sm text-gray-500">{time}</p>
+                <p className="text-gray-900 text-sm">{text}</p>
+                <p className="text-xs text-gray-500 mt-1">{time}</p>
             </div>
         </div>
     );

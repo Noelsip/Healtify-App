@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import Toast from '../../components/Toast';
 import '../../index.css';
 
 const BASE_URL = 'http://localhost:8000/api';
@@ -9,7 +10,12 @@ const AdminLogin = () => {
     const [password, setPassword] = useState("");
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(false);
+    const [toast, setToast] = useState(null);
     const navigate = useNavigate();
+
+    const showToast = (message, type = 'success') => {
+        setToast({ message, type });
+    };
 
     const handleLogin = async (e) => {
         e.preventDefault();
@@ -27,22 +33,26 @@ const AdminLogin = () => {
 
             const data = await response.json();
 
-            console.log('Login response data:', data);
-            console.log('Login Response Status:', data);
-
             if (response.ok && data.access) {
                 // Menyimpan token dan user info
                 localStorage.setItem('adminToken', data.access);
                 localStorage.setItem('adminRefreshToken', data.refresh);
                 localStorage.setItem('adminUser', JSON.stringify(data.user));
 
-                // Redirect ke dashboard admin
-                navigate('/admin/dashboard');
+                // Show success toast
+                showToast(`Welcome back, ${data.user.username}! 🎉`, 'success');
+
+                // Redirect setelah delay singkat
+                setTimeout(() => {
+                    navigate('/admin/dashboard');
+                }, 1500);
             } else {
-                setError(data.message || 'Login failed. Please try again.');
+                setError(data.message || 'Login failed. Please check your credentials.');
+                showToast('Invalid username or password', 'error');
             }
         } catch (error) {
-            setError('Network error. Please try again later.');
+            setError('Network error. Please check your connection.');
+            showToast('Network error. Please try again later.', 'error');
             console.error('Error during login:', error);
         } finally{
             setLoading(false);
@@ -50,7 +60,16 @@ const AdminLogin = () => {
     };
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4-">
+        <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+            {/* Toast Notification */}
+            {toast && (
+                <Toast 
+                    message={toast.message}
+                    type={toast.type}
+                    onClose={() => setToast(null)}
+                />
+            )}
+
             <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md">
                 {/* Header */}
                 <div className="text-center mb-8">
@@ -82,6 +101,7 @@ const AdminLogin = () => {
                             className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                             placeholder="Enter your username"
                             required
+                            disabled={loading}
                         />
                     </div>
 
@@ -96,13 +116,14 @@ const AdminLogin = () => {
                             className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                             placeholder="Enter Your Password"
                             required
+                            disabled={loading}
                         />
                     </div>
 
                     <button
                         type="submit"
                         disabled={loading}
-                        className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition duration-200 disabled:bg-gray-400"
+                        className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition duration-200 disabled:bg-gray-400 disabled:cursor-not-allowed"
                     >
                         {loading ? 'Logging in...' : 'Login'}
                     </button>
@@ -113,6 +134,7 @@ const AdminLogin = () => {
                     <button
                         onClick={() => navigate('/')}
                         className="text-blue-600 hover:text-blue-700 text-sm"
+                        disabled={loading}
                     >
                         ← Back to Home
                     </button>

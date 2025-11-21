@@ -1,6 +1,7 @@
 import logging
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from .email_service import email_service
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken  
@@ -9,6 +10,7 @@ from django.contrib.auth.models import User
 from django.contrib.auth.hashers import make_password
 from django.db.models import Count
 from django.db import transaction
+from django.utils import timezone
 from .models import Claim, Source, Dispute, VerificationResult
 from .permissions import IsAdminOrReadOnly, IsSuperAdminOnly
 
@@ -288,67 +290,14 @@ class AdminDisputeDetailView(APIView):
     """
     GET /api/admin/disputes/<id>/
     POST /api/admin/disputes/<id>/action/
-    
-    Melihat detail dispute dan melakukan aksi (approve/reject).
-    Ketika approve, akan update verification result claim.
     """
     permission_classes = [IsAuthenticated, IsAdminOrReadOnly]
 
-    def get(self, request, dispute_id):
-        """Melihat detail dispute"""
-        try:
-            dispute = Dispute.objects.select_related('claim').get(id=dispute_id)
-            
-            claim_details = None
-            if dispute.claim:
-                claim_details = {
-                    'text': dispute.claim.text,
-                    'label': None,
-                    'confidence': None,
-                }
-                
-                if hasattr(dispute.claim, 'verification_result'):
-                    claim_details['label'] = dispute.claim.verification_result.label
-                    claim_details['confidence'] = dispute.claim.verification_result.confidence
-            
-            return Response({
-                'id': dispute.id,
-                'claim_id': dispute.claim.id if dispute.claim else None,
-                'claim_text': dispute.claim_text,
-                'user_feedback': dispute.user_feedback,
-                'status': dispute.status,
-                'original_label': dispute.original_label,
-                'original_confidence': dispute.original_confidence,
-                'created_at': dispute.created_at.isoformat(),
-                'resolved_at': dispute.resolved_at.isoformat() if dispute.resolved_at else None,
-                'admin_notes': dispute.admin_notes,
-                'claim_details': claim_details
-            }, status=status.HTTP_200_OK)
-            
-        except Dispute.DoesNotExist:
-            return Response({
-                'error': 'Dispute not found'
-            }, status=status.HTTP_404_NOT_FOUND)
-        except Exception as e:
-            logger.error(f"[ADMIN_DISPUTE_DETAIL] Error: {str(e)}", exc_info=True)
-            return Response({
-                'error': 'Failed to fetch dispute details'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    # ...existing get method...
 
     @transaction.atomic
     def post(self, request, dispute_id):
-        """
-        Resolve dispute (approve/reject).
-        
-        Jika APPROVE:
-        1. Update dispute status → 'approved'
-        2. Update VerificationResult claim → ubah label berdasarkan user feedback
-        3. Simpan original verification sebagai backup
-        
-        Jika REJECT:
-        1. Update dispute status → 'rejected'
-        2. Tidak mengubah VerificationResult
-        """
+        """Resolve dispute (approve/reject) dengan email notification"""
         try:
             dispute = Dispute.objects.select_related('claim').get(id=dispute_id)
             
@@ -357,9 +306,9 @@ class AdminDisputeDetailView(APIView):
                     'error': f'Dispute already {dispute.status}. Cannot process again.'
                 }, status=status.HTTP_400_BAD_REQUEST)
             
-            action = request.data.get('action')  # 'approve' or 'reject'
+            action = request.data.get('action')
             admin_notes = request.data.get('admin_notes', '')
-            new_label = request.data.get('new_label', None)  # Optional: admin bisa override label
+            new_label = request.data.get('new_label', None)
             
             if action not in ['approve', 'reject']:
                 return Response({
@@ -367,9 +316,11 @@ class AdminDisputeDetailView(APIView):
                 }, status=status.HTTP_400_BAD_REQUEST)
             
             # Update dispute
-            dispute.status = action + 'd'  # 'approved' or 'rejected'
+            dispute.status = action + 'd'
             dispute.admin_notes = admin_notes
             dispute.resolved_at = timezone.now()
+            dispute.reviewed = True
+            dispute.reviewed_by = request.user
             dispute.save()
             
             response_data = {
@@ -381,38 +332,25 @@ class AdminDisputeDetailView(APIView):
                 }
             }
             
-            # Jika APPROVE dan ada claim terkait, update verification result
+            # Update verification jika APPROVE
             if action == 'approve' and dispute.claim:
                 try:
-                    # Cek apakah claim sudah punya verification result
                     if hasattr(dispute.claim, 'verification_result'):
                         verification = dispute.claim.verification_result
-                        
-                        # Backup original values (sudah ada di dispute model)
                         old_label = verification.label
                         old_confidence = verification.confidence
                         
-                        # Determine new label
-                        # Priority: admin override > user feedback analysis > default to MIXTURE
                         if new_label:
                             updated_label = new_label
                         else:
-                            # Analisis feedback user untuk determine new label
                             updated_label = self._analyze_feedback_for_label(
                                 dispute.user_feedback, 
                                 old_label
                             )
                         
-                        # Update verification result
                         verification.label = updated_label
-                        verification.confidence = 0.95  # High confidence karena sudah di-review admin
+                        verification.confidence = 0.95
                         verification.save()
-                        
-                        logger.info(
-                            f"[ADMIN_DISPUTE_APPROVE] Updated claim #{dispute.claim.id} "
-                            f"verification: {old_label} ({old_confidence:.2f}) → "
-                            f"{updated_label} (0.95) by admin {request.user.username}"
-                        )
                         
                         response_data['verification_updated'] = {
                             'claim_id': dispute.claim.id,
@@ -421,8 +359,13 @@ class AdminDisputeDetailView(APIView):
                             'new_label': updated_label,
                             'new_confidence': 0.95
                         }
+                        
+                        logger.info(
+                            f"[ADMIN_DISPUTE_APPROVE] Updated claim #{dispute.claim.id} "
+                            f"verification: {old_label} → {updated_label}"
+                        )
                     else:
-                        # Jika belum ada verification result, buat baru
+                        # Create new verification if doesn't exist
                         new_label_determined = new_label or self._analyze_feedback_for_label(
                             dispute.user_feedback, 
                             dispute.original_label
@@ -432,13 +375,7 @@ class AdminDisputeDetailView(APIView):
                             claim=dispute.claim,
                             label=new_label_determined,
                             confidence=0.95,
-                            reasoning="Updated by admin after dispute approval",
-                            sources=[]
-                        )
-                        
-                        logger.info(
-                            f"[ADMIN_DISPUTE_APPROVE] Created verification result for claim #{dispute.claim.id} "
-                            f"with label {new_label_determined} by admin {request.user.username}"
+                            summary="Updated by admin after dispute approval",
                         )
                         
                         response_data['verification_created'] = {
@@ -449,12 +386,20 @@ class AdminDisputeDetailView(APIView):
                         
                 except Exception as e:
                     logger.error(
-                        f"[ADMIN_DISPUTE_APPROVE] Failed to update verification for "
-                        f"claim #{dispute.claim.id}: {str(e)}", 
+                        f"[ADMIN_DISPUTE_APPROVE] Failed to update verification: {str(e)}", 
                         exc_info=True
                     )
-                    # Rollback akan otomatis terjadi karena @transaction.atomic
                     raise
+            
+            # ✅ KIRIM EMAIL KE USER (NEW FEATURE)
+            try:
+                if action == 'approve':
+                    email_service.notify_user_dispute_approved(dispute, admin_notes)
+                else:  # reject
+                    email_service.notify_user_dispute_rejected(dispute, admin_notes)
+            except Exception as e:
+                logger.error(f"[ADMIN_DISPUTE_ACTION] Failed to send user notification: {e}")
+                # Don't fail the request if email fails
             
             logger.info(f"[ADMIN_DISPUTE_ACTION] Dispute {dispute_id} {action}ed by {request.user.username}")
             
@@ -469,52 +414,6 @@ class AdminDisputeDetailView(APIView):
             return Response({
                 'error': 'Failed to process dispute action'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    
-    def _analyze_feedback_for_label(self, feedback: str, original_label: str) -> str:
-        """
-        Analisis feedback user untuk determine new label.
-        
-        Logic sederhana:
-        - Jika feedback menyebutkan "false", "salah", "tidak benar" → FALSE
-        - Jika feedback menyebutkan "true", "benar", "correct" → TRUE
-        - Jika feedback menyebutkan "mixture", "sebagian", "partially" → MIXTURE
-        - Default: flip original label (TRUE ↔ FALSE, MIXTURE tetap MIXTURE)
-        
-        Args:
-            feedback: User feedback text
-            original_label: Original verification label
-            
-        Returns:
-            New label (TRUE/FALSE/MIXTURE)
-        """
-        feedback_lower = feedback.lower()
-        
-        # Check for explicit mentions
-        false_keywords = ['false', 'salah', 'tidak benar', 'incorrect', 'wrong', 'keliru']
-        true_keywords = ['true', 'benar', 'correct', 'right', 'tepat']
-        mixture_keywords = ['mixture', 'sebagian', 'partially', 'partly', 'kadang']
-        
-        # Count keyword occurrences
-        false_count = sum(1 for kw in false_keywords if kw in feedback_lower)
-        true_count = sum(1 for kw in true_keywords if kw in feedback_lower)
-        mixture_count = sum(1 for kw in mixture_keywords if kw in feedback_lower)
-        
-        # Determine new label based on keyword analysis
-        if mixture_count > 0:
-            return 'MIXTURE'
-        elif false_count > true_count:
-            return 'FALSE'
-        elif true_count > false_count:
-            return 'TRUE'
-        else:
-            # Default: flip the original label
-            label_flip = {
-                'TRUE': 'FALSE',
-                'FALSE': 'TRUE',
-                'MIXTURE': 'MIXTURE',  # Keep mixture as mixture
-                'UNVERIFIED': 'FALSE'
-            }
-            return label_flip.get(original_label, 'MIXTURE')
 
 class AdminSourceListView(APIView):
     """
@@ -639,7 +538,6 @@ class AdminSourceListView(APIView):
                 'error': 'Failed to create source'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
 class AdminSourceDetailView(APIView):
     """
     GET /api/admin/sources/<id>/
@@ -756,7 +654,6 @@ class AdminSourceDetailView(APIView):
             return Response({
                 'error': 'Failed to delete source'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 class AdminSourceStatsView(APIView):
     """

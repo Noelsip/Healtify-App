@@ -68,3 +68,5 @@ cache/
 /training/scripts/*.pyc
 
 training/docker-compose.yml
+
+training/data/

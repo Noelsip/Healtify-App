@@ -18,8 +18,8 @@ const Sources = () => {
     ];
 
     return (
-        <section className="py-12 overflow-hidden px-4">
-            <h3 className="text-2xl md:text-3xl font-bold text-center text-slate-800 mb-8">
+        <section className="py-8 sm:py-12 overflow-hidden px-4">
+            <h3 className="text-xl sm:text-2xl md:text-3xl font-bold text-center text-slate-800 mb-6 sm:mb-8">
                 {t('sources.title')}
             </h3>
             <div className="relative">
@@ -28,32 +28,26 @@ const Sources = () => {
                     {sources.map((source, idx) => (
                         <div 
                             key={`first-${idx}`} 
-                            className="flex flex-col items-center gap-3 p-6 min-w-[150px] mx-4"
+                            className="flex flex-col items-center gap-2 sm:gap-3 p-4 sm:p-6 min-w-[100px] sm:min-w-[150px] mx-2 sm:mx-4"
                         >
                             <img 
                                 src={source.logo} 
                                 alt={`${source.name} logo`}
-                                className="w-16 h-16 object-contain hover:scale-110 transition-transform"
+                                className="w-12 h-12 sm:w-16 sm:h-16 object-contain hover:scale-110 transition-transform"
                             />
-                            <span className="text-sm font-semibold text-slate-600 text-center whitespace-nowrap">
-                                {source.name}
-                            </span>
                         </div>
                     ))}
-                    {/* Duplicate set for seamless loop */}
+                    {/* Duplicate set */}
                     {sources.map((source, idx) => (
                         <div 
                             key={`second-${idx}`} 
-                            className="flex flex-col items-center gap-3 p-6 min-w-[150px] mx-4"
+                            className="flex flex-col items-center gap-2 sm:gap-3 p-4 sm:p-6 min-w-[100px] sm:min-w-[150px] mx-2 sm:mx-4"
                         >
                             <img 
                                 src={source.logo} 
                                 alt={`${source.name} logo`}
-                                className="w-16 h-16 object-contain hover:scale-110 transition-transform"
+                                className="w-12 h-12 sm:w-16 sm:h-16 object-contain hover:scale-110 transition-transform"
                             />
-                            <span className="text-sm font-semibold text-slate-600 text-center whitespace-nowrap">
-                                {source.name}
-                            </span>
                         </div>
                     ))}
                 </div>

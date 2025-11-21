@@ -7,8 +7,12 @@ import pathlib
 import argparse
 import sys
 import traceback
+import hashlib
+import pickle
 from typing import List, Dict, Any, Optional
 from functools import lru_cache
+from functools import lru_cache
+from pathlib import Path
 
 # library ketiga
 from dotenv import load_dotenv, find_dotenv
@@ -33,6 +37,9 @@ PROJECT_ROOT = TRAINING_DIR.parent
 # Memastikan folder data/chunks exists
 DATA_DIR = TRAINING_DIR / "data"
 CHUNKS_DIR = DATA_DIR / "chunks"
+
+CACHE_DIR = DATA_DIR / "llm_cache"
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # helper untuk menyimpan hasil verifikasi
 VERIFICATION_RESULTS_PATH = TRAINING_DIR / "data" / "metadata" / "verification_results.jsonl"
@@ -98,6 +105,50 @@ if client is None:
         print(f"[ERROR] Failed to initialize Gemini client: {e}", file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
         sys.exit(2)
+
+def _get_cache_key(text: str, prefix: str = "") -> str:
+    """
+        Generate Caache key untuk LLM response.
+    """
+    content = f"{prefix}:{text}".encode('utf-8')
+    return hashlib.md5(content).hexdigest()
+
+def _load_from_cache(cache_key: str) -> Optional[Any]:
+    """Load Cache LLM Response."""
+    cache_file = CACHE_DIR / f"{cache_key}.pkl"
+    if cache_file.exists():
+        try:
+            with open(cache_file, 'rb') as f:
+                data = pickle.load(f)
+                # Check if cache is still valid (24 jam)
+                if time.time() - data['timestamp'] < 86400:
+                    return data['result']
+        except Exception as e:
+            print(f"[CACHE] Error Loading cache: {e}")
+    return None
+
+def _save_to_cache(cache_key: str, result: Any):
+    """Save LLM response to cache."""
+    cache_file = CACHE_DIR / f"{cache_key}.pkl"
+    try:
+        with open(cache_file, 'wb') as f:
+            pickle.dump({'timestamp': time.time(), 'result': result}, f)
+    except Exception as e:
+        print(f"[CACHE] Error saving cache: {e}")
+
+def get_cache_stats() -> Dict[str, Any]:
+    """Get cache statistics untuk monitoring."""
+    if not CACHE_DIR.exists():
+        return {"error": "Cache directory does not exist"}
+    
+    cache_files = list(CACHE_DIR.glob("*.pkl"))
+    total_size = sum(f.stat().st_size for f in cache_files)
+    
+    return {
+        "total_cached_items": len(cache_files),
+        "total_size_mb": total_size / (1024 * 1024),
+        "cache_dir": str(CACHE_DIR)
+    }
 
 # Better database connection check dengan proper error handling
 def check_database_connection():
@@ -237,9 +288,12 @@ def expand_relevance_patterns(claim: str, force_refresh: bool = False) -> List[s
 
     # Kembalikan cache jika masih fresh
     cached = _EXPANSION_CACHE.get(claim_key)
-    if cached and not force_refresh:
-        if (now - cached.get("ts", 0)) < EXPANSION_CACHE_TTL:
-            return cached.get("patterns", [])
+    if not force_refresh:
+        cache_key = _get_cache_key(claim, "relevance_patterns")
+        cached = _load_from_cache(cache_key)
+        if cached:
+            print(f"[CACHE HIT] Using cached relevance patterns")
+            return cached
 
     # Buat prompt untuk ekspansi pola yang lebih medis dan kontekstual
     prompt = (
@@ -285,7 +339,7 @@ def expand_relevance_patterns(claim: str, force_refresh: bool = False) -> List[s
             patterns_norm = [p for p in fallback][:EXPANSION_MIN_TERMS]
 
         # Cache dan kembalikan
-        _EXPANSION_CACHE[claim_key] = {"patterns": patterns_norm, "ts": now}
+        _save_to_cache(cache_key, patterns_norm)
         return patterns_norm
 
     except Exception as e:
@@ -481,6 +535,13 @@ def translate_text_gemini(text: str, target_lang: str = "English") -> str:
 
 def generate_bilingual_queries(claim: str, langs: List[str] = ["English"]) -> List[str]:
     """Generate variasi query dalam multiple bahasa dan sinonim yang lebih komprehensif."""
+    # Check cache first
+    cache_key = _get_cache_key(claim, "bilingual_queries")
+    cached = _load_from_cache(cache_key)
+    if cached:
+        print(f"[CACHE HIT] Using cached bilingual queries")
+        return cached
+    
     queries = []
     claim_clean = safe_strip(claim)
     
@@ -548,7 +609,9 @@ def generate_bilingual_queries(claim: str, langs: List[str] = ["English"]) -> Li
         if qn and qn not in unique_queries:
             unique_queries.append(qn)
     
-    return unique_queries[:8]  # Increased from 6 to 8 for better coverage
+    _save_to_cache(cache_key, queries)
+    return queries
+
 def retrieve_with_expansion_bilingual(claim: str, k: int = 5, 
                                      expand_queries: bool = True, 
                                      debug: bool = False) -> List[Dict[str, Any]]:
@@ -933,9 +996,23 @@ OUTPUT FORMAT:
   "summary": "ringkasan kesimpulan yang seimbang"
 }}
 """
+
 def call_gemini(prompt: str, model: str = "gemini-2.5-flash-lite", 
-               temperature: float = 0.0, max_output_tokens: int = 2000) -> str:
-    """Panggil Gemini API dengan fallback ke multiple models."""
+               temperature: float = 0.0, max_output_tokens: int = 2000,
+               use_cache: bool = True) -> str:
+    """Panggil Gemini API dengan caching untuk prompt yang sama."""
+    
+    # Generate cache key from prompt + config
+    if use_cache:
+        cache_key = _get_cache_key(
+            f"{prompt}|model={model}|temp={temperature}|max_tokens={max_output_tokens}",
+            prefix="gemini_verify"
+        )
+        cached = _load_from_cache(cache_key)
+        if cached:
+            print("[CACHE HIT] Using cached Gemini verification result", file=sys.stderr)
+            return cached
+    
     models_to_try = [model, "gemini-2.5-flash", "gemini-2.0-flash"]
     
     for m in models_to_try:
@@ -956,8 +1033,13 @@ def call_gemini(prompt: str, model: str = "gemini-2.5-flash-lite",
             if not text:
                 continue
             
-            # Bersihkan JSON fences
+            # Clean JSON fences
             text = text.replace("```json", "").replace("```", "").strip()
+            
+            # Save to cache before returning
+            if use_cache:
+                _save_to_cache(cache_key, text)
+            
             return text
             
         except Exception as e:
@@ -1170,6 +1252,7 @@ def verify_claim_local(claim: str, k: int = 5, dry_run: bool = False,
                       force_dynamic_fetch: bool = False, 
                       debug_retrieval: bool = False) -> Dict[str, Any]:
     """Main verification flow - verifikasi klaim medis menggunakan RAG pipeline."""
+    print(f"[CACHE_STATS] {json.dumps(get_cache_stats())}", file=sys.stderr)
     claim = safe_strip(claim)
     if not claim:
         raise ValueError("Klaim kosong.")

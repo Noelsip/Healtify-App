@@ -15,3 +15,5 @@ gunicorn
 python-dotenv
 requests
 httpx
+
+python-decouple sendgrid

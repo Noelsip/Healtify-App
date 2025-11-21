@@ -219,28 +219,120 @@ class ClaimDetailView(APIView):
 
 class ClaimListView(APIView):
     """
-    GET endpoint untuk mendapatkan list semua claims
+    GET /api/claims/
+    
+    List all claims dengan pagination dan filtering.
+    Mengembalikan claims beserta verification result untuk admin panel.
     """
-
+    
     def get(self, request):
-        logger.info("[LIST] Fetching claims list")
-        
         try:
-            claims = Claim.objects.filter(
-                status=Claim.STATUS_DONE
-            ).order_by('-created_at')[:50]
+            # Ambil query parameters
+            search = request.GET.get('search', '').strip()
+            label_filter = request.GET.get('label', '').strip().upper()
+            page = int(request.GET.get('page', 1))
+            per_page = int(request.GET.get('per_page', 50))
             
-            logger.info(f"[LIST] Found {claims.count()} completed claims")
+            # Base queryset dengan prefetch verification result
+            claims = Claim.objects.select_related('verification_result').order_by('-created_at')
             
-            serializer = ClaimDetailSerializer(claims, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
+            # Filter by search term
+            if search:
+                claims = claims.filter(
+                    Q(text__icontains=search) |
+                    Q(normalized_text__icontains=search)
+                )
+            
+            # Filter by label (dari verification result)
+            if label_filter and label_filter != 'ALL':
+                # Map frontend labels ke database labels
+                label_mapping = {
+                    'TRUE': ['true', 'valid'],
+                    'FALSE': ['false', 'hoax'],
+                    'MIXTURE': ['misleading', 'partially_valid'],
+                    'UNVERIFIED': ['inconclusive', 'unsupported', 'unverified']
+                }
+                
+                db_labels = label_mapping.get(label_filter, [label_filter.lower()])
+                claims = claims.filter(verification_result__label__in=db_labels)
+            
+            # Count total
+            total = claims.count()
+            
+            # Pagination
+            start = (page - 1) * per_page
+            end = start + per_page
+            claims_page = claims[start:end]
+            
+            # Build response data
+            claims_data = []
+            for claim in claims_page:
+                claim_dict = {
+                    'id': claim.id,
+                    'text': claim.text,
+                    'status': claim.status,
+                    'created_at': claim.created_at.isoformat(),
+                    'updated_at': claim.updated_at.isoformat(),
+                }
+                
+                # Add verification result if exists
+                if hasattr(claim, 'verification_result'):
+                    vr = claim.verification_result
+                    
+                    # Normalize label to frontend format
+                    db_label = vr.label.lower()
+                    frontend_label = self._map_label_to_frontend(db_label)
+                    
+                    claim_dict.update({
+                        'label': frontend_label,
+                        'confidence': vr.confidence,
+                        'summary': vr.summary,
+                        'verification_created_at': vr.created_at.isoformat()
+                    })
+                else:
+                    claim_dict.update({
+                        'label': 'UNVERIFIED',
+                        'confidence': 0.0,
+                        'summary': None,
+                        'verification_created_at': None
+                    })
+                
+                claims_data.append(claim_dict)
+            
+            logger.info(f"[CLAIM_LIST] Returned {len(claims_data)} claims (page {page}, total {total})")
+            
+            return Response({
+                'claims': claims_data,
+                'pagination': {
+                    'page': page,
+                    'per_page': per_page,
+                    'total': total,
+                    'total_pages': (total + per_page - 1) // per_page
+                }
+            }, status=status.HTTP_200_OK)
+            
         except Exception as e:
-            logger.error(f"[LIST] Error fetching claims list: {str(e)}", exc_info=True)
-            return Response(
-                {'error': 'Gagal mengambil daftar klaim'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-        
+            logger.error(f"[CLAIM_LIST] Error: {str(e)}", exc_info=True)
+            return Response({
+                'error': 'Failed to fetch claims',
+                'detail': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def _map_label_to_frontend(self, db_label: str) -> str:
+        """Map database label ke format yang diharapkan frontend."""
+        mapping = {
+            'true': 'TRUE',
+            'valid': 'TRUE',
+            'false': 'FALSE',
+            'hoax': 'FALSE',
+            'misleading': 'MIXTURE',
+            'partially_valid': 'MIXTURE',
+            'inconclusive': 'UNVERIFIED',
+            'unsupported': 'UNVERIFIED',
+            'unverified': 'UNVERIFIED'
+        }
+        return mapping.get(db_label, 'UNVERIFIED')
+      
 class DisputeCreateView(APIView):
     """
         POST endpoit untuk membuat dispute baru

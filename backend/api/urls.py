@@ -6,17 +6,25 @@ from .views import (
     DisputeCreateView,
     DisputeDetailView,
     DisputeListView,
-    DisputeAdminListView,
-    DisputeAdminActionView,
-    DisputeStatsView,
-    DisputeValidIdsView
 )
+
 from .auth_views import (
     AdminLoginView, 
     AdminLogoutView, 
     AdminTokenRefreshView,
     AdminMeView,
-    AdminCreateView
+    AdminCreateView,
+)
+
+from .admin_views import (
+    AdminDashboardStatsView,
+    AdminUserListView,
+    AdminUserDetailView,
+    AdminDisputeListView,
+    AdminDisputeDetailView,
+    AdminSourceListView,
+    AdminSourceDetailView,
+    AdminSourceStatsView
 )
 
 urlpatterns = [
@@ -44,10 +52,33 @@ urlpatterns = [
     path('admin/create/', AdminCreateView.as_view(), name='admin-create'),
     
     # ===========================
-    # Admin Protected Endpoints
+    # Admin Dashboard
     # ===========================
-    path('admin/disputes/', DisputeAdminListView.as_view(), name='admin-dispute-list'),
-    path('admin/disputes/<int:dispute_id>/action/', DisputeAdminActionView.as_view(), name='admin-dispute-action'),
-    path('admin/disputes/stats/', DisputeStatsView.as_view(), name='admin-dispute-stats'),
-    path('admin/disputes/valid-ids/', DisputeValidIdsView.as_view(), name='admin-dispute-valid-ids'),  
+    path('admin/dashboard/stats/', AdminDashboardStatsView.as_view(), name='admin-dashboard-stats'),
+    
+        
+    # ===========================
+    # Admin Users
+    # ===========================
+    path('admin/users/', AdminUserListView.as_view(), name='admin-user-list'),
+    path('admin/users/<int:user_id>/', AdminUserDetailView.as_view(), name='admin-user-detail'),
+
+    # ===========================
+    # Admin Operations
+    # ===========================
+    path('admin/dashboard/stats/', AdminDashboardStatsView.as_view(), name='admin-dashboard-stats'),
+    path('admin/users/', AdminUserListView.as_view(), name='admin-user-list'),
+    path('admin/users/<int:user_id>/', AdminUserDetailView.as_view(), name='admin-user-detail'),
+    
+    # Admin Disputes
+    path('admin/disputes/', AdminDisputeListView.as_view(), name='admin-dispute-list'),
+    path('admin/disputes/<int:dispute_id>/', AdminDisputeDetailView.as_view(), name='admin-dispute-detail'),
+    path('admin/disputes/<int:dispute_id>/action/', AdminDisputeDetailView.as_view(), name='admin-dispute-action'),
+
+    # ===========================
+    # Admin Sources 
+    # ===========================
+    path('admin/sources/', AdminSourceListView.as_view(), name='admin-source-list'),
+    path('admin/sources/stats/', AdminSourceStatsView.as_view(), name='admin-source-stats'),
+    path('admin/sources/<int:source_id>/', AdminSourceDetailView.as_view(), name='admin-source-detail'),
 ]

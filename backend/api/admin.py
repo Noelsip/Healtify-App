@@ -9,7 +9,12 @@ class SourceAdmin(admin.ModelAdmin):
     # menampilkan kolom di admin
     list_display = ('id', 'title', 'doi', 'url', 'publisher', 'published_date', 'created_at')
     search_fields = ('title', 'doi', 'url', 'authors', 'publisher')
+    list_filter = ('source_type', 'created_at')
     ordering = ('-created_at',)
+
+    def credibility_percent(self, obj):
+        return f"{obj.credibility_score * 100:.1f}%"
+    credibility_percent.short_description = 'Credibility'
 
 # admin untuk claim
 @admin.register(Claim)

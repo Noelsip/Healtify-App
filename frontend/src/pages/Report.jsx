@@ -1,11 +1,8 @@
 import React, { useState } from "react";
-import { useTranslation } from 'react-i18next';
 import { AlertCircle, CheckCircle, Upload, Loader2 } from 'lucide-react';
 import { createDispute } from '../services/api';
 
 const Report = () => {
-    const { t } = useTranslation();
-    
     // State untuk form fields
     const [formData, setFormData] = useState({
         claim_text: '',

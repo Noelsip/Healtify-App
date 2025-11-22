@@ -79,46 +79,92 @@ class Claim(models.Model):
 class ClaimSource(models.Model):
     claim = models.ForeignKey(Claim, on_delete=models.CASCADE)
     source = models.ForeignKey(Source, on_delete=models.CASCADE)
-    relevance_score = models.FloatField(default=0.0)  # skor relevansi antara klaim dan sumber
+    relevance_score = models.FloatField(default=0.0)  
     excerpt = models.TextField(blank=True, null=True)  
     rank = models.IntegerField(default=0)  
 
     class Meta:
         unique_together = ('claim', 'source')
+        ordering = ['rank']
+        indexes = [
+            models.Index(fields=['claim', 'source']),
+            models.Index(fields=['rank']),
+        ]
 
     def __str__(self):
         return f'ClaimSource: Claim #{self.claim_id} - Source #{self.source_id}'
+    
+    def save(self, *args, **kwargs):
+        """
+            Override save to handle duplicates gracefully.
+        """
+        try:
+            super().save(*args, **kwargs)
+        except Exception as e:
+            if 'unique constraint' in str(e).lower():
+                # log and skip duplicate
+                logger = logging.getLogger(__name__)
+                logger.warning(
+                    f"Skipping duplicate ClaimSource: "
+                    f"Claim_id={self.claim_id}, Source_id={self.source_id}"
+                )
+            else:
+                raise e
 
 # Model untuk menyimpan hasil verifikasi klaim untuk satu klaim
 class VerificationResult(models.Model):
     # Label hasil
-    LABEL_TRUE = 'true'
-    LABEL_FALSE = 'false'
-    LABEL_MISLEADING = 'misleading'
-    LABEL_UNSUPPORTED = 'unsupported'
-    LABEL_INCONCLUSIVE = 'inconclusive'
+    LABEL_VALID = 'valid'
+    LABEL_HOAX = 'hoax'
+    LABEL_UNCERTAIN = 'uncertain'
+    LABEL_UNVERIFIED = 'unverified'
+    
     LABEL_CHOICES = [
-        (LABEL_TRUE, 'True'),
-        (LABEL_FALSE, 'False'),
-        (LABEL_MISLEADING, 'Misleading'),
-        (LABEL_UNSUPPORTED, 'Unsupported'),
-        (LABEL_INCONCLUSIVE, 'Inconclusive'),
+        (LABEL_VALID, 'Valid'),
+        (LABEL_HOAX, 'Hoax'),
+        (LABEL_UNCERTAIN, 'Tidak Tentu'),
+        (LABEL_UNVERIFIED, 'Tidak Terverifikasi'),
     ]
     claim = models.OneToOneField(Claim, on_delete=models.CASCADE, related_name='verification_result')
     label = models.CharField(
         max_length=32,
         choices=LABEL_CHOICES,
-        default=LABEL_INCONCLUSIVE,
+        default=LABEL_UNVERIFIED,
     )
     summary = models.TextField(blank=True, null=True)  
     confidence = models.FloatField(default=0.0)
-    reviewer_notes = models.TextField(blank=True, null=True) # catatan tambahan dari reviewer
+    reviewer_notes = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def confidence_percent(self):
         return round(self.confidence * 100, 2)
 
+    def determine_label_from_confidence(self, has_sources=True):
+        """
+        Menentukan label berdasarkan confidence score:
+        - >= 0.75: Valid
+        - <= 0.5: Hoax
+        - > 0.5 dan < 0.75: Tidak Tentu
+        - Tidak ada sumber: Tidak Terverifikasi
+        """
+        if not has_sources:
+            return self.LABEL_UNVERIFIED
+        
+        if self.confidence >= 0.75:
+            return self.LABEL_VALID
+        elif self.confidence <= 0.5:
+            return self.LABEL_HOAX
+        else:  # 0.5 < confidence < 0.75
+            return self.LABEL_UNCERTAIN
+
+    def save(self, *args, **kwargs):
+        # Auto-set label based on confidence if not manually set
+        if not self.pk:  # Only on creation
+            has_sources = self.claim.sources.exists() if self.claim else False
+            self.label = self.determine_label_from_confidence(has_sources)
+        super().save(*args, **kwargs)
+        
     def __str__(self):
         return f'Verification Result for Claim #{self.claim_id}: {self.label} ({self.confidence:.2f})'
 

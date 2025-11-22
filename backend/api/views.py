@@ -9,6 +9,7 @@ from django.utils import timezone
 from django.db import transaction, models
 from django.db.models import Q
 from django.http import Http404
+from django.conf import settings
 
 from .models import Claim, VerificationResult, Source, ClaimSource, Dispute
 from .serializers import (
@@ -68,253 +69,647 @@ def check_cached_result(claim_text: str):
 # ===========================
 
 class ClaimVerifyView(APIView):
-    """POST endpoint untuk submit claim dan mendapatkan hasil verifikasi."""
+    """
+    POST endpoint untuk submit claim dan mendapatkan hasil verifikasi.
+    
+    Process:
+        1. Validate input claim text
+        2. Check cache untuk hasil verifikasi sebelumnya
+        3. Jika cache miss, process dengan AI verification
+        4. Tentukan label berdasarkan confidence score
+        5. Save hasil dan return response
+    
+    Returns:
+        - 200: Verification result (dari cache atau baru)
+        - 400: Invalid request data
+        - 500: Verification failed
+    """
+    
+    # Label determination thresholds
+    CONFIDENCE_THRESHOLD_VALID = 0.75
+    CONFIDENCE_THRESHOLD_HOAX = 0.5
 
     def post(self, request):
+        """Process claim verification request."""
         logger.info(f"[VERIFY] Received request from {request.META.get('REMOTE_ADDR', 'unknown')}")
-        logger.debug(f"[VERIFY] Request data: {request.data}")
-
+        
+        # Validate input
         serializer = ClaimCreateSerializer(data=request.data)
-
         if not serializer.is_valid():
             logger.warning(f"[VERIFY] Invalid request data: {serializer.errors}")
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
+            return Response(
+                serializer.errors, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
         claim_text = serializer.validated_data['text']
-        normalized_text = normalize_claim_text(claim_text)
-        text_hash = generate_claim_hash(claim_text)
-
-        logger.info(f"[VERIFY] Processing claim: '{claim_text[:80]}...' (hash: {text_hash[:16]})")
-
-        # Mengecek cache
+        logger.info(f"[VERIFY] Processing claim: '{claim_text[:80]}...'")
+        
+        # Check cache first
+        cached_response = self._get_cached_result(claim_text)
+        if cached_response:
+            return cached_response
+        
+        # Process new claim
+        try:
+            claim = self._create_new_claim(claim_text)
+            verification = self._process_verification(claim)
+            
+            # Update claim status to done
+            claim.status = Claim.STATUS_DONE
+            claim.save()
+            
+            # Return response
+            logger.info(f"[VERIFY] Successfully processed claim {claim.id}")
+            response_data = ClaimDetailSerializer(claim).data
+            return Response(response_data, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            logger.error(f"[VERIFY] Verification failed: {str(e)}", exc_info=True)
+            return self._handle_verification_error(e, claim_text, request)
+    
+    def _get_cached_result(self, claim_text):
+        """
+        Check if claim has been verified before.
+        
+        Args:
+            claim_text (str): The claim text to check
+            
+        Returns:
+            Response or None: Response object if cached, None otherwise
+        """
         is_cached, cache_claim, cached_verification = check_cached_result(claim_text)
-
+        
         if is_cached and cached_verification:
-            # Menggunakan hasil dari cache
-            logger.info(f"[VERIFY] Using cached result for claim ID: {cache_claim.id}")
-            logger.debug(f"[VERIFY] Cached label: {cached_verification.label}, confidence: {cached_verification.confidence}")
-
-            # Serialize hasil dari cache
+            logger.info(
+                f"[VERIFY] Cache HIT - Claim ID: {cache_claim.id}, "
+                f"Label: {cached_verification.label}, "
+                f"Confidence: {cached_verification.confidence:.2f}"
+            )
+            
             response_data = ClaimDetailSerializer(cache_claim).data
             return Response(response_data, status=status.HTTP_200_OK)
         
-        # Membuat claim baru jika tidak ada di cache
-        logger.info(f"[VERIFY] Processing new claim: '{claim_text[:80]}'")
-
-        with transaction.atomic():
-            # Membuat objek Claim baru
-            claim = Claim.objects.create(
-                text=claim_text,
-                normalized_text=normalized_text,
-                text_hash=text_hash,
-                status=Claim.STATUS_PROCESSING
-            )
-            logger.info(f"[VERIFY] Created new Claim object with ID: {claim.id}")
-
+        logger.info("[VERIFY] Cache MISS - Processing new claim")
+        return None
+    
+    def _create_new_claim(self, claim_text):
+        """
+        Create new Claim object in database.
+        
+        Args:
+            claim_text (str): The claim text
+            
+        Returns:
+            Claim: Created claim object
+        """
+        normalized_text = normalize_claim_text(claim_text)
+        text_hash = generate_claim_hash(claim_text)
+        
+        claim = Claim.objects.create(
+            text=claim_text,
+            normalized_text=normalized_text,
+            text_hash=text_hash,
+            status=Claim.STATUS_PROCESSING
+        )
+        
+        logger.info(
+            f"[VERIFY] Created Claim ID: {claim.id} "
+            f"(hash: {text_hash[:16]}...)"
+        )
+        
+        return claim
+    
+    def _process_verification(self, claim):
+        """
+        Process AI verification and create VerificationResult.
+        
+        Args:
+            claim (Claim): The claim to verify
+            
+        Returns:
+            VerificationResult: Created verification result
+            
+        Raises:
+            Exception: If AI verification fails
+        """
+        # Call AI verification service
+        ai_result = call_ai_verify(claim.text)
+        
+        logger.info(f"[VERIFY] AI verification completed for claim {claim.id}")
+        logger.debug(f"[VERIFY] AI result summary: {ai_result.get('summary', '')[:100]}...")
+        
+        # Extract results
+        sources_data = ai_result.get('sources', [])
+        confidence = ai_result.get('confidence', 0.0)
+        summary = ai_result.get('summary', '')
+        
+        # Determine label based on confidence and sources
+        label = self._determine_label(confidence, sources_data)
+        
+        # Create verification result
+        verification = VerificationResult.objects.create(
+            claim=claim,
+            label=label,
+            summary=summary,
+            confidence=confidence
+        )
+        
+        logger.info(
+            f"[VERIFY] Created VerificationResult ID: {verification.id} - "
+            f"Label: {label}, Confidence: {confidence:.2f}, "
+            f"Sources: {len(sources_data)}"
+        )
+        
+        # Process and link sources
+        if sources_data:
+            self._process_sources(claim, sources_data)
+        
+        return verification
+    
+    def _determine_label(self, confidence, sources_data):
+        """
+        Determine verification label based on confidence score and sources.
+        
+        Logic:
+            - No sources → UNVERIFIED
+            - Confidence >= 0.75 → VALID
+            - Confidence <= 0.5 → HOAX
+            - 0.5 < Confidence < 0.75 → UNCERTAIN
+        
+        Args:
+            confidence (float): Confidence score (0.0 - 1.0)
+            sources_data (list): List of source data
+            
+        Returns:
+            str: Label constant (LABEL_VALID, LABEL_HOAX, etc.)
+        """
+        has_sources = len(sources_data) > 0
+        
+        if not has_sources:
+            logger.info("[VERIFY] No sources found → UNVERIFIED")
+            return VerificationResult.LABEL_UNVERIFIED
+        
+        if confidence >= self.CONFIDENCE_THRESHOLD_VALID:
+            logger.info(f"[VERIFY] Confidence {confidence:.2f} >= {self.CONFIDENCE_THRESHOLD_VALID} → VALID")
+            return VerificationResult.LABEL_VALID
+        
+        if confidence <= self.CONFIDENCE_THRESHOLD_HOAX:
+            logger.info(f"[VERIFY] Confidence {confidence:.2f} <= {self.CONFIDENCE_THRESHOLD_HOAX} → HOAX")
+            return VerificationResult.LABEL_HOAX
+        
+        # 0.5 < confidence < 0.75
+        logger.info(
+            f"[VERIFY] Confidence {confidence:.2f} between "
+            f"{self.CONFIDENCE_THRESHOLD_HOAX}-{self.CONFIDENCE_THRESHOLD_VALID} → UNCERTAIN"
+        )
+        return VerificationResult.LABEL_UNCERTAIN
+    
+    def _process_sources(self, claim, sources_data):
+        """
+        Process and link sources to claim.
+        
+        Args:
+            claim (Claim): The claim object
+            sources_data (list): List of source dictionaries from AI
+        """
+        processed_count = 0
+        
+        for idx, source_data in enumerate(sources_data):
             try:
-                # Panggil AI verification
-                ai_result = call_ai_verify(claim_text)
-                logger.info(f"[VERIFY] AI verification completed for claim {claim.id}")
-                logger.debug(f"[VERIFY] AI result: {ai_result}")
-
-                # Simpan verification result
-                verification = VerificationResult.objects.create(
+                source = self._create_or_get_source(source_data)
+                
+                # Create ClaimSource relationship
+                ClaimSource.objects.create(
                     claim=claim,
-                    label=ai_result.get('label', 'inconclusive'),
-                    summary=ai_result.get('summary', ''),
-                    confidence=ai_result.get('confidence', 0.0)
+                    source=source,
+                    relevance_score=source_data.get('relevance_score', 0.0),
+                    excerpt=source_data.get('excerpt', ''),
+                    rank=idx + 1
                 )
-                logger.info(f"[VERIFY] Created VerificationResult ID: {verification.id}")
-
-                # Simpan sources
-                sources_data = ai_result.get('sources', [])
-                for idx, source_data in enumerate(sources_data):
-                    try:
-                        # Get or create Source
-                        source, created = Source.objects.get_or_create(
-                            doi=source_data.get('doi', ''),
-                            defaults={
-                                'title': source_data.get('title', 'Unknown'),
-                                'url': source_data.get('url', ''),
-                            }
-                        )
-                        
-                        # Create ClaimSource relationship
-                        ClaimSource.objects.create(
-                            claim=claim,
-                            source=source,
-                            relevance_score=source_data.get('relevance_score', 0.0),
-                            rank=idx + 1,
-                            excerpt=source_data.get('excerpt', '')
-                        )
-                        logger.debug(f"[VERIFY] Linked source {source.id} to claim {claim.id}")
-                    except Exception as e:
-                        logger.error(f"[VERIFY] Error saving source {idx}: {str(e)}")
-
-                # Update claim status
-                claim.status = Claim.STATUS_DONE
-                claim.save()
-                logger.info(f"[VERIFY] Claim {claim.id} verification completed successfully")
-
-                # Serialize dan return
-                response_data = ClaimDetailSerializer(claim).data
-                return Response(response_data, status=status.HTTP_201_CREATED)
-
+                
+                processed_count += 1
+                
             except Exception as e:
-                logger.error(f"[VERIFY] AI verification failed: {str(e)}", exc_info=True)
-                
-                # Kirim email ke admin jika verification failed
-                try:
-                    email_service.notify_admin_system_error(
-                        error_type="Claim Verification Failed",
-                        error_message=str(e),
-                        context={
-                            'claim_id': claim.id,
-                            'claim_text': claim_text[:100],
-                            'user_ip': request.META.get('REMOTE_ADDR', 'unknown')
-                        }
-                    )
-                except Exception as email_error:
-                    logger.error(f"[VERIFY] Failed to send error notification: {email_error}")
-                
-                # Update claim status to error
-                claim.status = 'error'
-                claim.save()
-                
-                return Response({
-                    'error': 'Verification failed',
-                    'detail': str(e)
-                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
+                logger.error(
+                    f"[VERIFY] Failed to process source {idx + 1}: {str(e)}", 
+                    exc_info=True
+                )
+        
+        logger.info(
+            f"[VERIFY] Linked {processed_count}/{len(sources_data)} sources to claim {claim.id}"
+        )
+    
+    def _create_or_get_source(self, source_data):
+        """
+        Create or retrieve existing Source object.
+        
+        Args:
+            source_data (dict): Source information from AI
+            
+        Returns:
+            Source: Created or existing source object
+        """
+        doi = source_data.get('doi', '').strip()
+        url = source_data.get('url', '').strip()
+        
+        # Try to find existing source by DOI or URL
+        if doi:
+            source = Source.objects.filter(doi=doi).first()
+            if source:
+                return source
+        
+        if url:
+            source = Source.objects.filter(url=url).first()
+            if source:
+                return source
+        
+        # Create new source
+        source = Source.objects.create(
+            title=source_data.get('title', 'Unknown')[:500],
+            doi=doi if doi else None,
+            url=url if url else None,
+            authors=source_data.get('authors', ''),
+            publisher=source_data.get('publisher', '')[:255],
+            published_date=source_data.get('published_date'),
+            source_type=source_data.get('source_type', 'journal'),
+            credibility_score=source_data.get('credibility_score', 0.5)
+        )
+        
+        logger.debug(f"[VERIFY] Created new Source ID: {source.id}")
+        return source
+    
+    def _handle_verification_error(self, error, claim_text, request):
+        """
+        Handle verification errors gracefully.
+        
+        Args:
+            error (Exception): The exception that occurred
+            claim_text (str): The claim text being processed
+            request: The HTTP request object
+            
+        Returns:
+            Response: Error response
+        """
+        logger.error(f"[VERIFY] Verification error: {str(error)}", exc_info=True)
+        
+        # Try to send admin notification
+        try:
+            email_service.notify_admin_system_error(
+                error_type="Claim Verification Failed",
+                error_message=str(error),
+                context={
+                    'claim_text': claim_text[:100],
+                    'user_ip': request.META.get('REMOTE_ADDR', 'unknown'),
+                    'error_type': type(error).__name__
+                }
+            )
+        except Exception as email_error:
+            logger.error(
+                f"[VERIFY] Failed to send error notification: {str(email_error)}"
+            )
+        
+        return Response(
+            {
+                'error': 'Verification failed',
+                'message': 'Terjadi kesalahan saat memverifikasi klaim. Tim kami telah diberitahu.',
+                'detail': str(error) if settings.DEBUG else None
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 
 class ClaimDetailView(APIView):
-    """GET endpoint untuk mendapatkan detail klaim berdasarkan ID"""
+    """
+    GET endpoint untuk mendapatkan detail klaim berdasarkan ID.
+    
+    Returns:
+        - 200: Claim detail dengan verification result
+        - 404: Claim tidak ditemukan
+        - 500: Server error
+    """
 
     def get(self, request, claim_id):
-        logger.info(f"[DETAIL] Fetching claim detail for ID: {claim_id}")
+        """Retrieve detailed information for a specific claim."""
+        logger.info(f"[CLAIM_DETAIL] Fetching claim ID: {claim_id}")
         
         try:
-            claim = get_object_or_404(Claim, id=claim_id)
-            logger.debug(f"[DETAIL] Found claim: '{claim.text[:50]}...'")
-            
+            claim = self._get_claim_or_404(claim_id)
             serializer = ClaimDetailSerializer(claim)
+            
+            logger.info(f"[CLAIM_DETAIL] Successfully retrieved claim {claim_id}")
             return Response(serializer.data, status=status.HTTP_200_OK)
-        except Exception as e:
-            logger.error(f"[DETAIL] Error fetching claim {claim_id}: {str(e)}", exc_info=True)
+            
+        except Http404:
+            logger.warning(f"[CLAIM_DETAIL] Claim {claim_id} not found")
             raise
-
+            
+        except Exception as e:
+            logger.error(f"[CLAIM_DETAIL] Unexpected error for claim {claim_id}: {str(e)}", exc_info=True)
+            return Response(
+                {
+                    'error': 'Failed to fetch claim details',
+                    'detail': 'An unexpected error occurred'
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    def _get_claim_or_404(self, claim_id):
+        """
+        Get claim by ID or raise 404.
+        
+        Args:
+            claim_id: The claim ID to fetch
+            
+        Returns:
+            Claim object with prefetched relations
+            
+        Raises:
+            Http404: If claim doesn't exist
+        """
+        return get_object_or_404(
+            Claim.objects.select_related('verification_result')
+                         .prefetch_related('sources'),
+            id=claim_id
+        )
 
 class ClaimListView(APIView):
-    """GET /api/claims/ - List all claims dengan pagination dan filtering."""
+    """
+    GET endpoint untuk list claims dengan pagination dan filtering.
     
+    Query Parameters:
+        - search (str): Search term untuk claim text
+        - label (str): Filter by label (valid, hoax, uncertain, unverified)
+        - page (int): Page number (default: 1)
+        - per_page (int): Items per page (default: 50, max: 100)
+    
+    Returns:
+        - 200: List of claims dengan pagination info
+        - 400: Invalid parameters
+        - 500: Server error
+    """
+    
+    DEFAULT_PAGE = 1
+    DEFAULT_PER_PAGE = 50
+    MAX_PER_PAGE = 100
+    
+    # Valid filter labels
+    VALID_LABELS = ['valid', 'hoax', 'uncertain', 'unverified']
+
     def get(self, request):
+        """List all claims with filtering and pagination."""
+        logger.info(f"[CLAIM_LIST] Request from {request.META.get('REMOTE_ADDR', 'unknown')}")
+        
         try:
-            # Ambil query parameters
-            search = request.GET.get('search', '').strip()
-            label_filter = request.GET.get('label', '').strip().upper()
-            page = int(request.GET.get('page', 1))
-            per_page = int(request.GET.get('per_page', 50))
+            # Parse and validate query parameters
+            params = self._parse_query_params(request)
             
-            # Base queryset dengan prefetch verification result
-            claims = Claim.objects.select_related('verification_result').order_by('-created_at')
+            # Build queryset with filters
+            claims = self._build_queryset(params)
             
-            # Filter by search term
-            if search:
-                claims = claims.filter(
-                    Q(text__icontains=search) |
-                    Q(normalized_text__icontains=search)
-                )
-            
-            # Filter by label (dari verification result)
-            if label_filter and label_filter != 'ALL':
-                # Map frontend labels ke database labels
-                label_mapping = {
-                    'TRUE': ['true', 'valid'],
-                    'FALSE': ['false', 'hoax'],
-                    'MIXTURE': ['misleading', 'partially_valid'],
-                    'UNVERIFIED': ['inconclusive', 'unsupported', 'unverified']
-                }
-                
-                db_labels = label_mapping.get(label_filter, [label_filter.lower()])
-                claims = claims.filter(verification_result__label__in=db_labels)
-            
-            # Count total
+            # Get total count before pagination
             total = claims.count()
             
-            # Pagination
-            start = (page - 1) * per_page
-            end = start + per_page
-            claims_page = claims[start:end]
+            # Apply pagination
+            claims_page = self._paginate_queryset(claims, params)
             
-            # Build response data
-            claims_data = []
-            for claim in claims_page:
-                claim_dict = {
-                    'id': claim.id,
-                    'text': claim.text,
-                    'status': claim.status,
-                    'created_at': claim.created_at.isoformat(),
-                    'updated_at': claim.updated_at.isoformat(),
-                }
-                
-                # Add verification result if exists
-                if hasattr(claim, 'verification_result'):
-                    vr = claim.verification_result
-                    
-                    # Normalize label to frontend format
-                    db_label = vr.label.lower()
-                    frontend_label = self._map_label_to_frontend(db_label)
-                    
-                    claim_dict.update({
-                        'label': frontend_label,
-                        'confidence': vr.confidence,
-                        'summary': vr.summary,
-                        'verification_created_at': vr.created_at.isoformat()
-                    })
-                else:
-                    claim_dict.update({
-                        'label': 'UNVERIFIED',
-                        'confidence': 0.0,
-                        'summary': None,
-                        'verification_created_at': None
-                    })
-                
-                claims_data.append(claim_dict)
+            # Serialize claims data
+            claims_data = self._serialize_claims(claims_page)
             
-            logger.info(f"[CLAIM_LIST] Returned {len(claims_data)} claims (page {page}, total {total})")
+            # Build pagination metadata
+            pagination = self._build_pagination_metadata(params, total)
             
-            return Response({
-                'claims': claims_data,
-                'pagination': {
-                    'page': page,
-                    'per_page': per_page,
-                    'total': total,
-                    'total_pages': (total + per_page - 1) // per_page
-                }
-            }, status=status.HTTP_200_OK)
+            logger.info(
+                f"[CLAIM_LIST] Returned {len(claims_data)} claims "
+                f"(page {params['page']}/{pagination['total_pages']}, total {total})"
+            )
+            
+            return Response(
+                {
+                    'claims': claims_data,
+                    'pagination': pagination,
+                    'filters': {
+                        'search': params['search'],
+                        'label': params['label']
+                    }
+                },
+                status=status.HTTP_200_OK
+            )
+            
+        except ValueError as e:
+            logger.warning(f"[CLAIM_LIST] Invalid parameters: {str(e)}")
+            return Response(
+                {
+                    'error': 'Invalid parameters',
+                    'detail': str(e)
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
             
         except Exception as e:
-            logger.error(f"[CLAIM_LIST] Error: {str(e)}", exc_info=True)
-            return Response({
-                'error': 'Failed to fetch claims',
-                'detail': str(e)
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.error(f"[CLAIM_LIST] Unexpected error: {str(e)}", exc_info=True)
+            return Response(
+                {
+                    'error': 'Failed to fetch claims',
+                    'detail': 'An unexpected error occurred'
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
     
-    def _map_label_to_frontend(self, db_label: str) -> str:
-        """Map database label ke format yang diharapkan frontend."""
-        mapping = {
-            'true': 'TRUE',
-            'valid': 'TRUE',
-            'false': 'FALSE',
-            'hoax': 'FALSE',
-            'misleading': 'MIXTURE',
-            'partially_valid': 'MIXTURE',
-            'inconclusive': 'UNVERIFIED',
-            'unsupported': 'UNVERIFIED',
-            'unverified': 'UNVERIFIED'
+    def _parse_query_params(self, request):
+        """
+        Parse and validate query parameters.
+        
+        Args:
+            request: The HTTP request object
+            
+        Returns:
+            dict: Validated parameters
+            
+        Raises:
+            ValueError: If parameters are invalid
+        """
+        # Search term
+        search = request.GET.get('search', '').strip()
+        
+        # Label filter
+        label_filter = request.GET.get('label', '').strip().lower()
+        if label_filter and label_filter not in ['all', ''] + self.VALID_LABELS:
+            raise ValueError(
+                f"Invalid label filter. Must be one of: {', '.join(self.VALID_LABELS)}"
+            )
+        
+        # Pagination
+        try:
+            page = int(request.GET.get('page', self.DEFAULT_PAGE))
+            if page < 1:
+                raise ValueError("Page must be >= 1")
+        except (ValueError, TypeError):
+            raise ValueError("Invalid page number")
+        
+        try:
+            per_page = int(request.GET.get('per_page', self.DEFAULT_PER_PAGE))
+            if per_page < 1:
+                raise ValueError("per_page must be >= 1")
+            if per_page > self.MAX_PER_PAGE:
+                per_page = self.MAX_PER_PAGE
+        except (ValueError, TypeError):
+            raise ValueError("Invalid per_page number")
+        
+        return {
+            'search': search,
+            'label': label_filter if label_filter not in ['all', ''] else None,
+            'page': page,
+            'per_page': per_page
         }
-        return mapping.get(db_label, 'UNVERIFIED')
-
+    
+    def _build_queryset(self, params):
+        """
+        Build queryset dengan filters yang diterapkan.
+        
+        Args:
+            params (dict): Validated query parameters
+            
+        Returns:
+            QuerySet: Filtered claims queryset
+        """
+        # Base queryset dengan optimized prefetch
+        claims = Claim.objects.select_related(
+            'verification_result'
+        ).prefetch_related(
+            'sources'
+        ).order_by('-created_at')
+        
+        # Apply search filter
+        if params['search']:
+            claims = claims.filter(
+                Q(text__icontains=params['search']) |
+                Q(normalized_text__icontains=params['search'])
+            )
+        
+        # Apply label filter
+        if params['label']:
+            claims = claims.filter(verification_result__label=params['label'])
+        
+        return claims
+    
+    def _paginate_queryset(self, queryset, params):
+        """
+        Apply pagination to queryset.
+        
+        Args:
+            queryset: The queryset to paginate
+            params (dict): Contains page and per_page
+            
+        Returns:
+            QuerySet: Paginated slice of queryset
+        """
+        start = (params['page'] - 1) * params['per_page']
+        end = start + params['per_page']
+        return queryset[start:end]
+    
+    def _serialize_claims(self, claims):
+        """
+        Convert claims to serialized data.
+        
+        Args:
+            claims: Iterable of Claim objects
+            
+        Returns:
+            list: List of claim dictionaries
+        """
+        claims_data = []
+        
+        for claim in claims:
+            claim_dict = self._serialize_claim(claim)
+            claims_data.append(claim_dict)
+        
+        return claims_data
+    
+    def _serialize_claim(self, claim):
+        """
+        Serialize single claim object.
+        
+        Args:
+            claim: Claim object
+            
+        Returns:
+            dict: Serialized claim data
+        """
+        claim_dict = {
+            'id': claim.id,
+            'text': claim.text,
+            'status': claim.status,
+            'created_at': claim.created_at.isoformat(),
+            'updated_at': claim.updated_at.isoformat(),
+        }
+        
+        # Add verification result if exists
+        if hasattr(claim, 'verification_result'):
+            verification = self._serialize_verification_result(claim.verification_result)
+            claim_dict.update(verification)
+        else:
+            claim_dict.update(self._get_default_verification())
+        
+        return claim_dict
+    
+    def _serialize_verification_result(self, vr):
+        """
+        Serialize verification result.
+        
+        Args:
+            vr: VerificationResult object
+            
+        Returns:
+            dict: Serialized verification data
+        """
+        return {
+            'label': vr.label,
+            'label_display': vr.get_label_display(),
+            'confidence': round(vr.confidence, 4),
+            'confidence_percent': vr.confidence_percent(),
+            'summary': vr.summary,
+            'verification_created_at': vr.created_at.isoformat(),
+            'verification_updated_at': vr.updated_at.isoformat()
+        }
+    
+    def _get_default_verification(self):
+        """
+        Get default verification data for claims without results.
+        
+        Returns:
+            dict: Default verification data
+        """
+        return {
+            'label': VerificationResult.LABEL_UNVERIFIED,
+            'label_display': 'Tidak Terverifikasi',
+            'confidence': 0.0,
+            'confidence_percent': 0.0,
+            'summary': None,
+            'verification_created_at': None,
+            'verification_updated_at': None
+        }
+    
+    def _build_pagination_metadata(self, params, total):
+        """
+        Build pagination metadata.
+        
+        Args:
+            params (dict): Query parameters with page and per_page
+            total (int): Total number of items
+            
+        Returns:
+            dict: Pagination metadata
+        """
+        total_pages = (total + params['per_page'] - 1) // params['per_page']
+        
+        return {
+            'page': params['page'],
+            'per_page': params['per_page'],
+            'total': total,
+            'total_pages': max(total_pages, 1),
+            'has_next': params['page'] < total_pages,
+            'has_previous': params['page'] > 1
+        }
 
 # ===========================
 # Dispute Views
@@ -393,7 +788,6 @@ class DisputeCreateView(APIView):
                 'message': 'Failed to create dispute'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
 class DisputeListView(APIView):
     """GET endpoint untuk list dispute"""
 
@@ -422,7 +816,6 @@ class DisputeListView(APIView):
             return Response({
                 'error': 'Failed to fetch disputes'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 class DisputeDetailView(APIView):
     """GET endpoint untuk detail satu dispute"""

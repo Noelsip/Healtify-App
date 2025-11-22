@@ -2,46 +2,86 @@ from rest_framework import serializers
 from .models import Claim, VerificationResult, Source, ClaimSource, Dispute
 
 class ClaimCreateSerializer(serializers.Serializer):
-    text = serializers.CharField(min_length=10, max_length=5000)
+    text = serializers.CharField(
+        max_length=5000,
+        required=True,
+        error_messages={
+            'required': 'Teks klaim wajib diisi',
+            'blank': 'Teks klaim tidak boleh kosong',
+            'max_length': 'Teks klaim terlalu panjang (maksimal 5000 karakter)'
+        }
+    )
 
 class SourceSerializer(serializers.ModelSerializer):
+    """serialization untuk sources."""
+    
     class Meta:
         model = Source
-        fields = (
+        fields = [
             'id',
             'title',
-            'doi', 
-            'url', 
+            'doi',
+            'url',
             'authors',
-            'publisher', 
-            'published_date'
-        )
+            'publisher',
+            'published_date',
+            'source_type',
+            'credibility_score',
+            'created_at'
+        ]
 
 class ClaimSourceSerializer(serializers.ModelSerializer):
     """
         Serializer untuk relasi Claim-source dengan relevance score
     """
     source = SourceSerializer(read_only=True)
-
+    
     class Meta:
         model = ClaimSource
-        fields = (
+        fields = [
             'source',
             'relevance_score',
-            'rank',
-            'excerpt'
-        )
+            'excerpt',
+            'rank'
+        ]
 
 class VerificationResultSerializer(serializers.ModelSerializer):
+    """
+        Menambahkan fields untuk frontend
+    """
+    confidence_percent = serializers.SerializerMethodField()
+    label_display = serializers.CharField(source='get_label_display', read_only=True)
+    label_color = serializers.SerializerMethodField()
+    
     class Meta:
         model = VerificationResult
-        fields = (
-            'label',
-            'summary',
-            'confidence',
-            'created_at',
+        fields = [
+            'id', 
+            'label', 
+            'label_display',
+            'label_color',
+            'summary', 
+            'confidence', 
+            'confidence_percent',
+            'reviewer_notes',
+            'created_at', 
             'updated_at'
-        )
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+    
+    def get_confidence_percent(self, obj):
+        """Return confidence sebagai persentase."""
+        return obj.confidence_percent()
+    
+    def get_label_color(self, obj):
+        """Return warna untuk frontend berdasarkan label."""
+        color_map = {
+            VerificationResult.LABEL_VALID: 'green',
+            VerificationResult.LABEL_HOAX: 'red',
+            VerificationResult.LABEL_UNCERTAIN: 'yellow',
+            VerificationResult.LABEL_UNVERIFIED: 'gray'
+        }
+        return color_map.get(obj.label, 'gray')
 
 class ClaimDetailSerializer(serializers.ModelSerializer):
     """
@@ -49,10 +89,10 @@ class ClaimDetailSerializer(serializers.ModelSerializer):
     """
     verification_result = VerificationResultSerializer(read_only=True)
     sources = serializers.SerializerMethodField()
-
+    
     class Meta:
         model = Claim
-        fields = (
+        fields = [
             'id',
             'text',
             'normalized_text',
@@ -61,14 +101,11 @@ class ClaimDetailSerializer(serializers.ModelSerializer):
             'updated_at',
             'verification_result',
             'sources'
-        )
-
+        ]
+    
     def get_sources(self, obj):
-        """Get sources yang terhubung dengan claim ini, diurutkan berdasarkan rank."""
-        claim_sources = ClaimSource.objects.filter(
-            claim=obj
-        ).select_related('source').order_by('rank')
-        
+        """Get sources dengan ranking dan relevance score."""
+        claim_sources = ClaimSource.objects.filter(claim=obj).select_related('source').order_by('rank')
         return ClaimSourceSerializer(claim_sources, many=True).data
 
 class DisputeCreateSerializer(serializers.Serializer):

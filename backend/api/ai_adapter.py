@@ -58,47 +58,53 @@ def normalize_claim_text(text: str) -> str:
     return text.strip().lower()
 
 def normalize_ai_response(ai_result: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Normalize AI response untuk konsistensi dengan backend model.
-    
-    - Map label ke format backend
-    - Normalize confidence (0.0-1.0)
-    - Normalize sources structure
-    """
-    # Map label
     raw_label = ai_result.get('label', 'inconclusive')
+    confidence_raw = ai_result.get('confidence', 0)
+    try:
+        confidence = float(confidence_raw)
+    except (TypeError, ValueError):
+        confidence = 0.0
+    if confidence > 1.0 and confidence <= 100.0:
+        confidence /= 100.0
+    confidence = max(0.0, min(confidence, 1.0))
+
+    sources = extract_sources(ai_result)
+
     normalized_label = map_training_label_to_backend(raw_label)
-    
-    # Normalize confidence
-    confidence = float(ai_result.get('confidence', 0.0))
-    confidence = max(0.0, min(1.0, confidence))  # Clamp to [0, 1]
-    
-    # Normalize sources
-    sources = ai_result.get('sources', [])
-    if not isinstance(sources, list):
-        sources = []
-    
-    # Ensure each source has required fields
-    normalized_sources = []
-    for src in sources:
-        if not isinstance(src, dict):
-            continue
-        
-        normalized_sources.append({
-            'title': src.get('title', 'Unknown'),
-            'doi': src.get('doi', ''),
-            'url': src.get('url', ''),
-            'relevance_score': float(src.get('relevance', 0) or src.get('relevance_score', 0)),
-            'excerpt': src.get('snippet', '')[:500] if src.get('snippet') else src.get('text', '')[:500],
-            'source_type': src.get('source_type', 'journal'),
-        })
-    
+    if normalized_label not in ('valid', 'hoax', 'uncertain', 'unverified'):
+        normalized_label = 'uncertain'
+
+    # Build enriched summary
+    original_summary = (ai_result.get('summary') or "").strip()
+    if sources:
+        quotes = []
+        for s in sources[:5]:
+            ex = s.get('excerpt')
+            if ex:
+                quotes.append(f"• “{ex[:160]}”")
+        evidence_block = "Evidence excerpts:\n" + "\n".join(quotes) if quotes else ""
+        if not original_summary:
+            combined_summary = evidence_block or "Tidak ada ringkasan."
+        elif len(original_summary) < 300 and evidence_block:
+            combined_summary = original_summary + "\n\n" + evidence_block
+        else:
+            combined_summary = original_summary
+    else:
+        combined_summary = original_summary or "Tidak ada sumber pendukung ditemukan."
+
+    # Detect journal presence
+    has_journal = any(
+        (s.get('doi') or '').strip() or s.get('source_type') == 'journal'
+        for s in sources
+    )
+    final_label = determine_verification_label(confidence, has_sources=bool(sources), has_journal=has_journal)
+
     return {
-        'label': normalized_label,
+        'label': final_label,
         'confidence': confidence,
-        'summary': ai_result.get('summary', ''),
-        'sources': normalized_sources,
-        '_original_label': raw_label,  # Keep for debugging
+        'summary': combined_summary,
+        'sources': sources,
+        '_original_label': raw_label,
         '_processing_time': ai_result.get('_processing_time', 0),
         '_method': ai_result.get('_method', 'unknown')
     }
@@ -262,31 +268,44 @@ def extract_sources(result: Dict[str, Any]) -> List[Dict[str, Any]]:
         safe_id = (src.get("safe_id") or "").strip()
 
         # Create unique key
-        identifier = doi if doi else url
+        identifier = doi or url or safe_id
 
         # Skip duplicates
         if not identifier or identifier in seen_identifiers:
             continue
-
         seen_identifiers.add(identifier)
         
+
+        # Membuat title fallback
+        raw_title = src.get("title") or safe_id or "Unknown"
+        snippet = (src.get("snippet") or src.get("text") or "").strip()
+        if raw_title == "Unknown" and snippet:
+            raw_title = snippet[:80] + ("..." if len(snippet) > 80 else "")
+
+        # Normalize excerpt
+        excerpt = snippet[:500] 
+
         # Normalize source structure
         source_obj = {
-            "title": src.get("title") or src.get("source_file") or src.get("safe_id") or "Unknown",
+            "title":raw_title,
             "doi": doi,
             "url": url or (f"https://doi.org/{doi}" if doi else ""),
-            "relevance_score": float(src.get("relevance_score", 0) or src.get("relevance", 0) or 0),
-            "excerpt": (src.get("text") or src.get("snippet") or "")[:500],
-            "source_type": src.get("source_type", "journal")
+            "relevance_score": float(
+                src.get("relevance_score", 0)
+                or src.get("relevance", 0) 
+                or 0
+            ),
+            "excerpt": excerpt,
+            "source_type": src.get("source_type", "journal"),
         }
         
         sources.append(source_obj)
     
     # Sort by relevance
-    sources.sort(key=lambda x: x.get("relevance", 0), reverse=True)
+    sources.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
     
     # Limit to top 10
-    return sources[:10]
+    return sources[:5]
 
 def normalize_label(label: str) -> str:
     """
@@ -435,7 +454,6 @@ def call_ai_verify_direct_optimized(claim_text: str) -> Dict[str, Any]:
         # Fallback to subprocess
         logger.info("⚠️  Falling back to subprocess method")
         return call_ai_verify_subprocess(claim_text)
-
 
 # ===========================
 # Subprocess Method (Fallback)
@@ -780,26 +798,29 @@ logger.info("="*80)
 
 # Add or update this function
 
-def determine_verification_label(confidence_score, has_sources=True):
+def determine_verification_label(confidence_score, has_sources=True, has_journal=False):
     """
-    Menentukan label verifikasi berdasarkan confidence score
-    
-    Args:
-        confidence_score (float): Skor confidence (0.0 - 1.0)
-        has_sources (bool): Apakah ada sumber penelitian yang ditemukan
-    
-    Returns:
-        str: Label verifikasi ('valid', 'hoax', 'uncertain', 'unverified')
+    Aturan:
+    - unverified jika tidak ada sumber jurnal
+    - valid jika confidence >= 0.75 dan ada sumber jurnal
+    - hoax jika confidence <= 0.5 dan ada sumber jurnal
+    - uncertain jika 0.5 < confidence < 0.75 dan ada sumber jurnal
     """
-    if not has_sources:
+    try:
+        c = float(confidence_score)
+    except (TypeError, ValueError):
+        c = 0.0
+    if c > 1.0 and c <= 100.0:
+        c /= 100.0
+    c = max(0.0, min(c, 1.0))
+
+    if not has_sources or not has_journal:
         return 'unverified'
-    
-    if confidence_score >= 0.75:
+    if c >= 0.75:
         return 'valid'
-    elif confidence_score <= 0.5:
+    if c <= 0.5:
         return 'hoax'
-    else:  # 0.5 < confidence < 0.75
-        return 'uncertain'
+    return 'uncertain'
 
 def create_verification_result(claim, confidence, summary, sources_count=0):
     """

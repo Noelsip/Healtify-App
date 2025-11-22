@@ -19,7 +19,7 @@ from .serializers import (
     DisputeDetailSerializer,
     DisputeAdminActionSerializer
 )
-from .ai_adapter import call_ai_verify
+from .ai_adapter import call_ai_verify, determine_verification_label
 from .email_service import email_service
 
 logger = logging.getLogger(__name__)
@@ -203,11 +203,18 @@ class ClaimVerifyView(APIView):
         sources_data = ai_result.get('sources', [])
         confidence = ai_result.get('confidence', 0.0)
         summary = ai_result.get('summary', '')
-        
-        # Determine label based on confidence and sources
-        label = self._determine_label(confidence, sources_data)
-        
-        # Create verification result
+
+        has_journal = any(
+            (s.get('doi') or '').strip() or s.get('source_type') == 'journal'
+            for s in sources_data
+        )
+
+        label = determine_verification_label(
+            confidence_score=confidence,
+            has_sources=bool(sources_data),
+            has_journal=has_journal
+        )
+
         verification = VerificationResult.objects.create(
             claim=claim,
             label=label,

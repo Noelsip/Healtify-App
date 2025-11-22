@@ -162,22 +162,14 @@ const Hero = () => {
      */
     const formatLabel = (label) => {
         if (!label) return { text: 'Unknown', color: 'bg-gray-600' };
-        
-        // Normalisasi ke uppercase untuk matching
-        const normalizedLabel = String(label).toUpperCase().trim();
-        
-        const labelMap = {
-            'TRUE': { text: 'Valid', color: 'bg-blue-600' },
-            'VALID': { text: 'Valid', color: 'bg-blue-600' },
-            'FALSE': { text: 'Hoax', color: 'bg-red-600' },
-            'HOAX': { text: 'Hoax', color: 'bg-red-600' },
-            'INVALID': { text: 'Hoax', color: 'bg-red-600' },
-            'MISLEADING': { text: 'Misleading', color: 'bg-orange-600' },
-            'UNSUPPORTED': { text: 'Unsupported', color: 'bg-yellow-600' },
-            'INCONCLUSIVE': { text: 'Inconclusive', color: 'bg-gray-600' },
+        const normalized = String(label).toLowerCase();
+        const map = {
+            valid: { text: 'Valid', color: 'bg-blue-600' },
+            hoax: { text: 'Hoax', color: 'bg-red-600' },
+            uncertain: { text: 'Uncertain', color: 'bg-orange-600' },
+            unverified: { text: 'Unverified', color: 'bg-gray-600' }
         };
-        
-        return labelMap[normalizedLabel] || { text: label, color: 'bg-gray-600' };
+        return map[normalized] || { text: label, color: 'bg-gray-600' };
     };
 
     /**

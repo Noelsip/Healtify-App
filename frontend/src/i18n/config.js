@@ -19,13 +19,39 @@ const resources = {
         desc: "Verify now",
         searchPlaceholder: "example: covid-19 causes infertility",
         verifyButton: "Verify Now",
-        badges: {
-          valid: "Valid",
-          invalid: "Invalid",
-          confidence: "Confidence",
-          evaluation: "Evaluation"
+        verifying: "Verifying...",
+        analyzing: "Analyzing your claim...",
+        pleaseWait: "This may take 30-60 seconds",
+        yourClaim: "Your Claim",
+        analysisSummary: "Analysis Summary",
+        reference: "References",
+        verifiedBy: "Verified by Healthify",
+        confidence: "Confidence",
+        relevance: "Relevance",
+        noTitle: "No Title Available",
+        noSummary: "No summary available",
+        enterClaim: "Enter a claim to verify",
+        resultsWillAppear: "Results will appear here after verification",
+        errors: {
+          emptyQuery: "Please enter a claim to verify",
+          verificationFailed: "Verification failed. Please try again."
         },
-        reference: "Reference:"
+        success: {
+          complete: "Verification complete! Result:"
+        }
+      },
+      labels: {
+        valid: "FAKTA",
+        hoax: "HOAX",
+        uncertain: "TIDAK PASTI",
+        unverified: "TIDAK TERVERIFIKASI",
+        unknown: "Unknown"
+      },
+      common: {
+        error: "Error",
+        success: "Success",
+        warning: "Warning",
+        info: "Info"
       },
       faq: {
         title: "Frequently Asked Questions",
@@ -98,13 +124,39 @@ const resources = {
         desc: "Verifikasi sekarang",
         searchPlaceholder: "contoh: covid-19 membuat kemandulan",
         verifyButton: "Verifikasi Sekarang",
-        badges: {
-          valid: "Valid",
-          invalid: "Tidak Valid",
-          confidence: "Confidence",
-          evaluation: "Evaluasi"
+        verifying: "Memverifikasi...",
+        analyzing: "Menganalisis klaim Anda...",
+        pleaseWait: "Ini mungkin memakan waktu 30-60 detik",
+        yourClaim: "Klaim Anda",
+        analysisSummary: "Ringkasan Analisis",
+        reference: "Referensi",
+        verifiedBy: "Diverifikasi oleh Healthify",
+        confidence: "Tingkat Keyakinan",
+        relevance: "Relevansi",
+        noTitle: "Tidak Ada Judul",
+        noSummary: "Tidak ada ringkasan tersedia",
+        enterClaim: "Masukkan klaim untuk diverifikasi",
+        resultsWillAppear: "Hasil akan muncul di sini setelah verifikasi",
+        errors: {
+          emptyQuery: "Silakan masukkan klaim untuk diverifikasi",
+          verificationFailed: "Verifikasi gagal. Silakan coba lagi."
         },
-        reference: "Referensi:"
+        success: {
+          complete: "Verifikasi selesai! Hasil:"
+        }
+      },
+      labels: {
+        valid: "FAKTA",
+        hoax: "HOAX",
+        uncertain: "TIDAK PASTI",
+        unverified: "TIDAK TERVERIFIKASI",
+        unknown: "Tidak Diketahui"
+      },
+      common: {
+        error: "Kesalahan",
+        success: "Berhasil",
+        warning: "Peringatan",
+        info: "Informasi"
       },
       faq: {
         title: "Pertanyaan yang Sering Diajukan",
@@ -166,7 +218,7 @@ i18n
   .use(initReactI18next)
   .init({
     resources,
-    lng: 'id', // Default bahasa Indonesia
+    lng: 'id',
     fallbackLng: 'en',
     interpolation: {
       escapeValue: false

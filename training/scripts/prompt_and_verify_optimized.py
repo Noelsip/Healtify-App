@@ -773,6 +773,60 @@ def main():
         traceback.print_exc(file=sys.stderr)
         sys.exit(1)
 
+def translate_to_english_fast(text: str) -> str:
+    """Fast translation untuk query expansion."""
+    try:
+        client = get_gemini_client()
+        prompt = f"Translate to English (medical terms): {text}\nOutput translation only."
+        
+        resp = client.models.generate_content(
+            model="gemini-2.5-flash-lite",
+            contents=prompt,
+            config={"temperature": 0.0, "max_output_tokens": 100}
+        )
+        
+        return extract_llm_text(resp).strip() or text
+    except:
+        return text
+
+# Update parallel_fetch_all to use English queries
+def parallel_fetch_all(claim: str, limit_per_source: int = 5) -> List[Dict]:
+    """Fetch dengan bilingual queries untuk hasil internasional."""
+    cache_key = f"fetch:{text_hash(claim)}"
+    cached = fetch_cache.get(cache_key)
+    if cached:
+        return cached
+    
+    # Translate to English for better international results
+    claim_en = translate_to_english_fast(claim)
+    
+    all_items = []
+    
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        # Use BOTH Indonesian and English queries
+        futures = {
+            # Indonesian query
+            executor.submit(fetch_crossref_fast, claim, limit_per_source): "crossref_id",
+            executor.submit(fetch_semantic_fast, claim, limit_per_source): "semantic_id",
+            executor.submit(fetch_pubmed_fast, claim, limit_per_source): "pubmed_id",
+            # English query for international journals
+            executor.submit(fetch_crossref_fast, claim_en, limit_per_source): "crossref_en",
+            executor.submit(fetch_semantic_fast, claim_en, limit_per_source): "semantic_en",
+            executor.submit(fetch_pubmed_fast, claim_en, limit_per_source): "pubmed_en",
+        }
+        
+        for future in futures:
+            try:
+                result = future.result(timeout=TOTAL_FETCH_TIMEOUT)
+                if result:
+                    all_items.extend(result)
+            except:
+                pass
+    
+    if all_items:
+        fetch_cache.set(cache_key, all_items)
+    
+    return all_items
 
 if __name__ == "__main__":
     main()

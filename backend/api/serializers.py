@@ -46,9 +46,6 @@ class ClaimSourceSerializer(serializers.ModelSerializer):
         ]
 
 class VerificationResultSerializer(serializers.ModelSerializer):
-    """
-        Menambahkan fields untuk frontend
-    """
     confidence_percent = serializers.SerializerMethodField()
     label_display = serializers.CharField(source='get_label_display', read_only=True)
     label_color = serializers.SerializerMethodField()
@@ -61,8 +58,8 @@ class VerificationResultSerializer(serializers.ModelSerializer):
             'label_display',
             'label_color',
             'summary', 
-            'confidence', 
-            'confidence_percent',
+            'confidence',  # Can be NULL
+            'confidence_percent',  # Can be NULL
             'reviewer_notes',
             'created_at', 
             'updated_at'
@@ -70,7 +67,7 @@ class VerificationResultSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at', 'updated_at']
     
     def get_confidence_percent(self, obj):
-        """Return confidence sebagai persentase."""
+        """Return confidence sebagai persentase, or None for unverified."""
         return obj.confidence_percent()
     
     def get_label_color(self, obj):

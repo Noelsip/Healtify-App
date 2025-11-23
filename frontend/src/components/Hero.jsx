@@ -161,16 +161,18 @@ const Hero = () => {
      * Format untuk labeling
      */
     const formatLabel = (label) => {
-        if (!label) return { text: 'Unknown', color: 'bg-gray-600' };
-        const normalized = String(label).toLowerCase();
-        const map = {
-            valid: { text: 'Valid', color: 'bg-blue-600' },
-            hoax: { text: 'Hoax', color: 'bg-red-600' },
-            uncertain: { text: 'Uncertain', color: 'bg-orange-600' },
-            unverified: { text: 'Unverified', color: 'bg-gray-600' }
-        };
-        return map[normalized] || { text: label, color: 'bg-gray-600' };
+    if (!label) return { text: t('labels.unknown'), color: 'bg-gray-600' };
+    
+    const normalized = String(label).toLowerCase();
+    const map = {
+        'valid': { text: t('labels.valid'), color: 'bg-blue-600' },
+        'hoax': { text: t('labels.hoax'), color: 'bg-red-600' },
+        'uncertain': { text: t('labels.uncertain'), color: 'bg-orange-600' },
+        'unverified': { text: t('labels.unverified'), color: 'bg-gray-600' }
     };
+    
+    return map[normalized] || { text: t('labels.unknown'), color: 'bg-gray-600' };
+};
 
     /**
      * Format confidence score 
@@ -254,15 +256,26 @@ const Hero = () => {
 
                     <div className="p-4 sm:p-6 md:p-8">
                         {/* Badges */}
-                        <div className="flex flex-wrap gap-2 sm:gap-3 mb-6 justify-center sm:justify-end">
-                            <span className={`${formatLabel(verificationResult.verification_result?.label).color} text-white px-3 sm:px-4 py-1.5 rounded text-xs md:text-sm font-bold`}>
-                                {formatLabel(verificationResult.verification_result?.label).text}
-                            </span>
+                        {verificationResult.verification_result?.confidence !== null && 
+                        verificationResult.verification_result?.confidence !== undefined && 
+                        verificationResult.verification_result?.label !== 'unverified' && (
                             <span className="bg-slate-600 text-white px-3 sm:px-4 py-1.5 rounded text-xs md:text-sm font-bold">
-                                Confidence: {formatConfidence(verificationResult.verification_result?.confidence || 0)}%
+                                {t('hero.confidence')}: {formatConfidence(verificationResult.verification_result?.confidence)}%
                             </span>
-                        </div>
-
+                        )}
+                        {/* Label Badge */}
+                        {verificationResult.verification_result?.label && (
+                            <span className={`${formatLabel(verificationResult.verification_result.label).color} text-white px-3 sm:px-4 py-1.5 rounded text-xs md:text-sm font-bold ml-2`}>
+                                {formatLabel(verificationResult.verification_result.label).text}
+                            </span>
+                        )}
+                        {/* Confidence Badge (if confidence is not null/undefined) */}
+                        {verificationResult.verification_result?.confidence !== null &&
+                         verificationResult.verification_result?.confidence !== undefined && (
+                            <span className="bg-blue-100 text-blue-700 px-3 sm:px-4 py-1.5 rounded text-xs md:text-sm font-bold ml-2">
+                                📊 {t('hero.confidence')}: {formatConfidence(verificationResult.verification_result.confidence)}%
+                            </span>
+                        )}
                         {/* Claim Text */}
                         <div className="mb-4 p-3 sm:p-4 bg-blue-50 rounded-lg">
                             <h3 className="font-bold text-sm sm:text-base text-slate-800 mb-2">Your Claim:</h3>

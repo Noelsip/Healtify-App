@@ -113,61 +113,86 @@ class ClaimSource(models.Model):
 
 # Model untuk menyimpan hasil verifikasi klaim untuk satu klaim
 class VerificationResult(models.Model):
-    # Label hasil
+    # Label hasil - UPDATED LABELS
     LABEL_VALID = 'valid'
     LABEL_HOAX = 'hoax'
     LABEL_UNCERTAIN = 'uncertain'
     LABEL_UNVERIFIED = 'unverified'
     
     LABEL_CHOICES = [
-        (LABEL_VALID, 'Valid'),
-        (LABEL_HOAX, 'Hoax'),
-        (LABEL_UNCERTAIN, 'Tidak Tentu'),
-        (LABEL_UNVERIFIED, 'Tidak Terverifikasi'),
+        (LABEL_VALID, 'FAKTA'),  # Changed from 'Valid'
+        (LABEL_HOAX, 'HOAX'),    # Remains same
+        (LABEL_UNCERTAIN, 'TIDAK PASTI'),  # Changed from 'Tidak Tentu'
+        (LABEL_UNVERIFIED, 'TIDAK TERVERIFIKASI'),  # Changed from 'Tidak Terverifikasi'
     ]
+    
     claim = models.OneToOneField(Claim, on_delete=models.CASCADE, related_name='verification_result')
     label = models.CharField(
         max_length=32,
         choices=LABEL_CHOICES,
         default=LABEL_UNVERIFIED,
     )
-    summary = models.TextField(blank=True, null=True)  
-    confidence = models.FloatField(default=0.0)
+    summary = models.TextField(blank=True, null=True)
+    
+    # IMPORTANT: Confidence can be NULL for UNVERIFIED claims
+    confidence = models.FloatField(default=0.0, null=True, blank=True)
+    
     reviewer_notes = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    logic_version = models.CharField(max_length=32, default="v1.0", null=True)
+    logic_version = models.CharField(max_length=32, default="v2.0", null=True)
 
     def confidence_percent(self):
+        """Return confidence as percentage, or None if unverified."""
+        if self.label == self.LABEL_UNVERIFIED or self.confidence is None:
+            return None
         return round(self.confidence * 100, 2)
 
-    def determine_label_from_confidence(self, has_sources=True):
+    def determine_label_from_confidence(self, has_sources=True, has_journal=False):
         """
-        Menentukan label berdasarkan confidence score:
-        - >= 0.75: Valid
-        - <= 0.5: Hoax
-        - > 0.5 dan < 0.75: Tidak Tentu
-        - Tidak ada sumber: Tidak Terverifikasi
+        Menentukan label berdasarkan confidence score dan sumber.
+        
+        Rules:
+        - TIDAK TERVERIFIKASI: tidak ada sumber atau bukan topik kesehatan
+        - FAKTA: confidence >= 0.75 dengan sumber jurnal
+        - HOAX: confidence <= 0.55 dengan sumber jurnal
+        - TIDAK PASTI: 0.55 < confidence < 0.75 dengan sumber jurnal
         """
-        if not has_sources:
+        if not has_sources or not has_journal:
+            return self.LABEL_UNVERIFIED
+        
+        if self.confidence is None:
             return self.LABEL_UNVERIFIED
         
         if self.confidence >= 0.75:
             return self.LABEL_VALID
-        elif self.confidence <= 0.5:
+        elif self.confidence <= 0.55:
             return self.LABEL_HOAX
-        else:  # 0.5 < confidence < 0.75
+        else:  # 0.55 < confidence < 0.75
             return self.LABEL_UNCERTAIN
 
     def save(self, *args, **kwargs):
-        # Auto-set label based on confidence if not manually set
+        """Auto-set label based on confidence if not manually set."""
         if not self.pk:  # Only on creation
             has_sources = self.claim.sources.exists() if self.claim else False
-            self.label = self.determine_label_from_confidence(has_sources)
+            has_journal = False
+            if has_sources:
+                # Check if any source is a journal (has DOI)
+                has_journal = self.claim.sources.filter(
+                    models.Q(doi__isnull=False) | models.Q(source_type='journal')
+                ).exists()
+            
+            self.label = self.determine_label_from_confidence(has_sources, has_journal)
+            
+            # Set confidence to NULL for unverified
+            if self.label == self.LABEL_UNVERIFIED:
+                self.confidence = None
+                
         super().save(*args, **kwargs)
         
     def __str__(self):
-        return f'Verification Result for Claim #{self.claim_id}: {self.label} ({self.confidence:.2f})'
+        conf_str = f"{self.confidence:.2f}" if self.confidence is not None else "N/A"
+        return f'Verification Result for Claim #{self.claim_id}: {self.get_label_display()} ({conf_str})'
 
 # Model laporan hasil verifikasi klaim oleh user
 class Dispute(models.Model):

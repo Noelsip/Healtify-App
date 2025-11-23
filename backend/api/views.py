@@ -219,7 +219,8 @@ class ClaimVerifyView(APIView):
             claim=claim,
             label=label,
             summary=summary,
-            confidence=confidence
+            confidence=confidence,
+            logic_version="v1.0"
         )
         
         logger.info(

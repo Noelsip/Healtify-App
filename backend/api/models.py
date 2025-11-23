@@ -136,6 +136,7 @@ class VerificationResult(models.Model):
     reviewer_notes = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    logic_version = models.CharField(max_length=32, default="v1.0", null=True)
 
     def confidence_percent(self):
         return round(self.confidence * 100, 2)

@@ -29,7 +29,7 @@ ADMIN_NOTIFICATION_EMAILS = os.getenv('ADMIN_NOTIFICATION_EMAILS', '').split(','
 ADMIN_NOTIFICATION_EMAILS = [email.strip() for email in ADMIN_NOTIFICATION_EMAILS if email.strip()]
 
 # Notification settings
-ENABLE_EMAIL_NOTIFICATIONS = os.getenv('ENABLE_EMAIL_NOTIFICATIONS', 'True') == 'True'
+ENABLE_EMAIL_NOTIFICATIONS = False
 NOTIFICATION_FROM_NAME = os.getenv('NOTIFICATION_FROM_NAME', 'Healthify System')
 
 # SECURITY WARNING: keep the secret key used in production secret!

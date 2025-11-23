@@ -1,7 +1,9 @@
 import logging
 import hashlib
+import re
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from rest_framework.decorators import api_view
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from django.shortcuts import get_object_or_404
@@ -19,26 +21,87 @@ from .serializers import (
     DisputeDetailSerializer,
     DisputeAdminActionSerializer
 )
+from .text_normalization import (
+    ClaimSimilarityMatcher, 
+    calculate_text_similarity,
+    normalize_claim_text
+)
 from .ai_adapter import call_ai_verify, determine_verification_label
 from .email_service import email_service
+from .models import Claim
 
 logger = logging.getLogger(__name__)
 
 # ===========================
-# Utility Functions
+# Utility Functions - IMPROVED NORMALIZATION
 # ===========================
 
 def normalize_claim_text(text: str) -> str:
-    """Normalisasi teks klaim untuk konsistensi"""
-    return text.strip().lower()
+    """
+    Normalisasi teks klaim untuk konsistensi - IMPROVED VERSION.
+    
+    Proses normalisasi:
+    1. Lowercase
+    2. Remove extra whitespace
+    3. Remove punctuation (kecuali yang bermakna medis)
+    4. Standardize medical terms
+    5. Remove common stop words (optional)
+    """
+    if not text:
+        return ""
+    
+    # 1. Lowercase
+    normalized = text.lower().strip()
+    
+    # 2. Replace multiple spaces/tabs/newlines dengan single space
+    normalized = re.sub(r'\s+', ' ', normalized)
+    
+    # 3. Remove punctuation KECUALI yang bermakna (angka, persen, slash untuk dosis)
+    # Hapus: . , ! ? ; : " ' ( ) [ ] { } - _ 
+    # Tapi pertahankan: / (untuk dosis), % (untuk persentase)
+    normalized = re.sub(r'[.,!?;:\"\'\(\)\[\]\{\}_]', '', normalized)
+    normalized = re.sub(r'-+', ' ', normalized)  # Tanda hubung jadi spasi
+    
+    # 4. Standardisasi variasi ejaan medis umum
+    medical_variations = {
+        r'\bkanker paru paru\b': 'kanker paru',
+        r'\bkanker paruparu\b': 'kanker paru',
+        r'\bparu paru\b': 'paru',
+        r'\bdiabetes mellitus\b': 'diabetes',
+        r'\bdiabetes melitus\b': 'diabetes',
+        r'\btekanan darah tinggi\b': 'hipertensi',
+        r'\bserangan jantung\b': 'infark miokard',
+        r'\bstroke\b': 'stroke',
+        r'\bcovid 19\b': 'covid19',
+        r'\bcovid-19\b': 'covid19',
+    }
+    
+    for pattern, replacement in medical_variations.items():
+        normalized = re.sub(pattern, replacement, normalized)
+    
+    # 5. Remove extra spaces lagi setelah replacements
+    normalized = re.sub(r'\s+', ' ', normalized).strip()
+    
+    return normalized
 
 def generate_claim_hash(text: str) -> str:
-    """Generate hash unik untuk claim text"""
+    """
+    Generate hash unik untuk claim text dengan normalisasi yang lebih baik.
+    
+    Hash ini digunakan untuk:
+    - Deteksi duplikasi claim
+    - Cache lookup
+    """
     normalized = normalize_claim_text(text)
     return hashlib.sha256(normalized.encode()).hexdigest()
 
 def check_cached_result(claim_text: str):
-    """Mengecek apakah claim sudah pernah diverifikasi sebelumnya"""
+    """
+    Mengecek apakah claim sudah pernah diverifikasi sebelumnya.
+    
+    Returns:
+        tuple: (is_cached, claim_object, verification_result)
+    """
     text_hash = generate_claim_hash(claim_text)
 
     try:
@@ -64,6 +127,51 @@ def check_cached_result(claim_text: str):
         logger.error(f"[CACHE ERROR] Terjadi kesalahan saat mengecek cache: {str(e)}", exc_info=True)
         return False, None, None
 
+def find_similar_claims(claim_text: str, threshold: float = 0.85) -> list:
+    """
+    Cari claim yang mirip berdasarkan similarity score.
+    Berguna untuk mendeteksi claim yang semantically similar tapi tidak exact match.
+    
+    Args:
+        claim_text: Text claim yang dicari
+        threshold: Minimum similarity score (0-1)
+    
+    Returns:
+        list: List of similar claims
+    """
+    from difflib import SequenceMatcher
+    
+    normalized = normalize_claim_text(claim_text)
+    
+    # Get recent claims untuk comparison
+    recent_claims = Claim.objects.filter(
+        status=Claim.STATUS_DONE
+    ).order_by('-created_at')[:100]
+    
+    similar_claims = []
+    
+    for claim in recent_claims:
+        if not claim.normalized_text:
+            continue
+            
+        # Calculate similarity ratio
+        similarity = SequenceMatcher(
+            None, 
+            normalized, 
+            claim.normalized_text
+        ).ratio()
+        
+        if similarity >= threshold:
+            similar_claims.append({
+                'claim': claim,
+                'similarity': similarity
+            })
+    
+    # Sort by similarity descending
+    similar_claims.sort(key=lambda x: x['similarity'], reverse=True)
+    
+    return similar_claims
+
 # ===========================
 # Claim Views
 # ===========================
@@ -74,10 +182,11 @@ class ClaimVerifyView(APIView):
     
     Process:
         1. Validate input claim text
-        2. Check cache untuk hasil verifikasi sebelumnya
-        3. Jika cache miss, process dengan AI verification
-        4. Tentukan label berdasarkan confidence score
-        5. Save hasil dan return response
+        2. Normalize text untuk consistency
+        3. Check exact match cache (by hash)
+        4. Check similar claims (semantic similarity)
+        5. Jika tidak ada match, process dengan AI verification
+        6. Save hasil dan return response
     
     Returns:
         - 200: Verification result (dari cache atau baru)
@@ -88,6 +197,7 @@ class ClaimVerifyView(APIView):
     # Label determination thresholds
     CONFIDENCE_THRESHOLD_VALID = 0.75
     CONFIDENCE_THRESHOLD_HOAX = 0.5
+    SIMILARITY_THRESHOLD = 0.90  # 90% similarity = consider as duplicate
 
     def post(self, request):
         """Process claim verification request."""
@@ -105,10 +215,15 @@ class ClaimVerifyView(APIView):
         claim_text = serializer.validated_data['text']
         logger.info(f"[VERIFY] Processing claim: '{claim_text[:80]}...'")
         
-        # Check cache first
+        # Check exact match cache first
         cached_response = self._get_cached_result(claim_text)
         if cached_response:
             return cached_response
+        
+        # Check for similar claims (semantic similarity)
+        similar_response = self._check_similar_claims(claim_text)
+        if similar_response:
+            return similar_response
         
         # Process new claim
         try:
@@ -130,7 +245,10 @@ class ClaimVerifyView(APIView):
     
     def _get_cached_result(self, claim_text):
         """
-        Check if claim has been verified before.
+        Check if claim has been verified before (exact match by hash).
+        
+        PENTING: Juga check apakah verification result sudah di-update 
+        (misalnya dari dispute approval).
         
         Args:
             claim_text (str): The claim text to check
@@ -140,17 +258,103 @@ class ClaimVerifyView(APIView):
         """
         is_cached, cache_claim, cached_verification = check_cached_result(claim_text)
         
-        if is_cached and cached_verification:
-            logger.info(
-                f"[VERIFY] Cache HIT - Claim ID: {cache_claim.id}, "
-                f"Label: {cached_verification.label}, "
-                f"Confidence: {cached_verification.confidence:.2f}"
-            )
+        if is_cached and cache_claim and cached_verification:
+            # ✅ PENTING: Check apakah verification result sudah di-update
+            # Jika ada dispute yang di-approve, verification result mungkin sudah berubah
             
-            response_data = ClaimDetailSerializer(cache_claim).data
-            return Response(response_data, status=status.HTTP_200_OK)
+            try:
+                # Get fresh verification result dari database
+                fresh_verification = VerificationResult.objects.filter(
+                    claim=cache_claim
+                ).latest('updated_at')  # Get most recent
+                
+                logger.info(f"[CACHE] Found claim {cache_claim.id}, checking for updates...")
+                
+                # Compare timestamps untuk detect kalau ada update
+                if fresh_verification.updated_at > cached_verification.updated_at:
+                    logger.info(
+                        f"[CACHE] Verification result was updated! "
+                        f"Old: {cached_verification.updated_at}, "
+                        f"New: {fresh_verification.updated_at}"
+                    )
+                    # Use fresh verification instead of cached
+                    cached_verification = fresh_verification
+                
+            except VerificationResult.DoesNotExist:
+                logger.warning(f"[CACHE] No verification found for claim {cache_claim.id}")
+                return None
+            except Exception as e:
+                logger.warning(f"[CACHE] Error checking fresh verification: {e}")
+                # Fall through to use cached version
+            
+            # Build response dengan verification result (fresh atau cached)
+            try:
+                response_data = ClaimDetailSerializer({
+                    'claim': cache_claim,
+                    'verification_result': cached_verification
+                }).data
+                
+                logger.info(
+                    f"[CACHE HIT] Returning cached claim {cache_claim.id} "
+                    f"with {cached_verification.label} label"
+                )
+                
+                return Response(
+                    {
+                        **response_data,
+                        '_cache_status': 'hit',
+                        '_from_cache': True
+                    },
+                    status=status.HTTP_200_OK
+                )
+            except Exception as e:
+                logger.error(f"[CACHE] Error serializing cached result: {e}")
+                return None
         
-        logger.info("[VERIFY] Cache MISS - Processing new claim")
+        logger.info("[VERIFY] Cache MISS (exact) - Checking similarity...")
+        return None
+    
+    def _check_similar_claims(self, claim_text):
+        """
+        Check for semantically similar claims.
+        
+        Args:
+            claim_text (str): The claim text to check
+            
+        Returns:
+            Response or None: Response object if similar claim found, None otherwise
+        """
+        try:
+            similar_claims = find_similar_claims(claim_text, threshold=self.SIMILARITY_THRESHOLD)
+            
+            if similar_claims:
+                best_match = similar_claims[0]
+                similarity = best_match['similarity']
+                matched_claim = best_match['claim']
+                
+                logger.info(
+                    f"[VERIFY] Similar claim found - "
+                    f"Claim ID: {matched_claim.id}, "
+                    f"Similarity: {similarity:.2%}"
+                )
+                
+                # Get verification result
+                if hasattr(matched_claim, 'verification_result'):
+                    response_data = ClaimDetailSerializer(matched_claim).data
+                    response_data['_cache_hit'] = 'similar'
+                    response_data['_similarity_score'] = round(similarity, 4)
+                    response_data['_matched_claim_id'] = matched_claim.id
+                    
+                    logger.info(
+                        f"[VERIFY] Cache HIT (similar) - "
+                        f"Using result from Claim ID: {matched_claim.id}"
+                    )
+                    
+                    return Response(response_data, status=status.HTTP_200_OK)
+        
+        except Exception as e:
+            logger.warning(f"[VERIFY] Error checking similar claims: {e}")
+        
         return None
     
     def _create_new_claim(self, claim_text):
@@ -168,7 +372,7 @@ class ClaimVerifyView(APIView):
         
         claim = Claim.objects.create(
             text=claim_text,
-            normalized_text=normalized_text,
+            text_normalized=normalized_text,
             text_hash=text_hash,
             status=Claim.STATUS_PROCESSING
         )
@@ -177,6 +381,7 @@ class ClaimVerifyView(APIView):
             f"[VERIFY] Created Claim ID: {claim.id} "
             f"(hash: {text_hash[:16]}...)"
         )
+        logger.debug(f"[VERIFY] Normalized: '{normalized_text}'")
         
         return claim
     
@@ -201,31 +406,29 @@ class ClaimVerifyView(APIView):
         
         # Extract results
         sources_data = ai_result.get('sources', [])
-        confidence = ai_result.get('confidence', 0.0)
+        confidence = ai_result.get('confidence')  # Bisa None untuk unverified
         summary = ai_result.get('summary', '')
+        label = ai_result.get('label', 'unverified')
 
-        has_journal = any(
-            (s.get('doi') or '').strip() or s.get('source_type') == 'journal'
-            for s in sources_data
-        )
+        # Validate label
+        valid_labels = ['valid', 'hoax', 'uncertain', 'unverified']
+        if label not in valid_labels:
+            logger.warning(f"[VERIFY] Invalid label '{label}' dari AI, fallback ke 'unverified'")
+            label = 'unverified'
 
-        label = determine_verification_label(
-            confidence_score=confidence,
-            has_sources=bool(sources_data),
-            has_journal=has_journal
-        )
-
+        # Create verification result
         verification = VerificationResult.objects.create(
             claim=claim,
             label=label,
             summary=summary,
-            confidence=confidence,
-            logic_version="v1.0"
+            confidence=confidence,  # None untuk unverified
+            logic_version="v2.0"
         )
         
         logger.info(
             f"[VERIFY] Created VerificationResult ID: {verification.id} - "
-            f"Label: {label}, Confidence: {confidence:.2f}, "
+            f"Label: {label}, "
+            f"Confidence: {confidence if confidence is not None else 'N/A'}, "
             f"Sources: {len(sources_data)}"
         )
         
@@ -234,44 +437,6 @@ class ClaimVerifyView(APIView):
             self._process_sources(claim, sources_data)
         
         return verification
-    
-    def _determine_label(self, confidence, sources_data):
-        """
-        Determine verification label based on confidence score and sources.
-        
-        Logic:
-            - No sources → UNVERIFIED
-            - Confidence >= 0.75 → VALID
-            - Confidence <= 0.5 → HOAX
-            - 0.5 < Confidence < 0.75 → UNCERTAIN
-        
-        Args:
-            confidence (float): Confidence score (0.0 - 1.0)
-            sources_data (list): List of source data
-            
-        Returns:
-            str: Label constant (LABEL_VALID, LABEL_HOAX, etc.)
-        """
-        has_sources = len(sources_data) > 0
-        
-        if not has_sources:
-            logger.info("[VERIFY] No sources found → UNVERIFIED")
-            return VerificationResult.LABEL_UNVERIFIED
-        
-        if confidence >= self.CONFIDENCE_THRESHOLD_VALID:
-            logger.info(f"[VERIFY] Confidence {confidence:.2f} >= {self.CONFIDENCE_THRESHOLD_VALID} → VALID")
-            return VerificationResult.LABEL_VALID
-        
-        if confidence <= self.CONFIDENCE_THRESHOLD_HOAX:
-            logger.info(f"[VERIFY] Confidence {confidence:.2f} <= {self.CONFIDENCE_THRESHOLD_HOAX} → HOAX")
-            return VerificationResult.LABEL_HOAX
-        
-        # 0.5 < confidence < 0.75
-        logger.info(
-            f"[VERIFY] Confidence {confidence:.2f} between "
-            f"{self.CONFIDENCE_THRESHOLD_HOAX}-{self.CONFIDENCE_THRESHOLD_VALID} → UNCERTAIN"
-        )
-        return VerificationResult.LABEL_UNCERTAIN
     
     def _process_sources(self, claim, sources_data):
         """
@@ -673,7 +838,7 @@ class ClaimListView(APIView):
         return {
             'label': vr.label,
             'label_display': vr.get_label_display(),
-            'confidence': round(vr.confidence, 4),
+            'confidence': round(vr.confidence, 4) if vr.confidence is not None else None,
             'confidence_percent': vr.confidence_percent(),
             'summary': vr.summary,
             'verification_created_at': vr.created_at.isoformat(),
@@ -690,8 +855,8 @@ class ClaimListView(APIView):
         return {
             'label': VerificationResult.LABEL_UNVERIFIED,
             'label_display': 'Tidak Terverifikasi',
-            'confidence': 0.0,
-            'confidence_percent': 0.0,
+            'confidence': None,
+            'confidence_percent': None,
             'summary': None,
             'verification_created_at': None,
             'verification_updated_at': None
@@ -725,77 +890,116 @@ class ClaimListView(APIView):
 
 class DisputeCreateView(APIView):
     """POST endpoint untuk membuat dispute baru"""
-
+    
     def post(self, request):
         logger.info(f"[DISPUTE CREATE] Received request from {request.META.get('REMOTE_ADDR', 'unknown')}")
-
+        
         serializer = DisputeCreateSerializer(data=request.data)
-
         if not serializer.is_valid():
-            logger.warning(f"[DISPUTE CREATE] Invalid request data: {serializer.errors}")
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         
-        data = serializer.validated_data
-        claim_id = data.get('claim_id')
-        claim_text = data.get('claim_text', '')
-
-        # Mencari claim jika ada claim_id
-        claim_obj = None
-        if claim_id:
-            try:
-                claim_obj = Claim.objects.get(id=claim_id)
-                claim_text = claim_obj.text
-            except Claim.DoesNotExist:
-                logger.warning(f"[DISPUTE CREATE] Claim ID {claim_id} tidak ditemukan")
+        validated_data = serializer.validated_data
+        claim_id = validated_data.get('claim_id')
+        claim_text = validated_data.get('claim_text', '')
         
-        # Membuat Dispute
+        # ✅ PENTING: Auto-link dispute ke claim jika ada
+        claim = None
+        
+        if claim_id:
+            # Explicit claim_id provided
+            try:
+                claim = Claim.objects.get(id=claim_id)
+                logger.info(f"[DISPUTE CREATE] Using explicit claim_id: {claim_id}")
+            except Claim.DoesNotExist:
+                logger.warning(f"[DISPUTE CREATE] Claim {claim_id} not found, will create without link")
+        
+        elif claim_text:
+            # Try to find matching claim by text similarity
+            try:
+                from .text_normalization import normalize_claim_text, calculate_text_similarity
+                
+                normalized_input = normalize_claim_text(claim_text)
+                
+                # Find all claims dengan similarity >= 0.85
+                all_claims = Claim.objects.filter(status=Claim.STATUS_DONE).values_list('id', 'text')
+                
+                best_match = None
+                best_similarity = 0.0
+                
+                for cid, ctext in all_claims:
+                    similarity = calculate_text_similarity(claim_text, ctext)
+                    if similarity > best_similarity:
+                        best_similarity = similarity
+                        best_match = cid
+                
+                # ✅ AUTO-LINK jika similarity >= 0.80
+                if best_match and best_similarity >= 0.80:
+                    claim = Claim.objects.get(id=best_match)
+                    logger.info(
+                        f"[DISPUTE CREATE] Auto-linked to Claim {best_match} "
+                        f"(similarity: {best_similarity:.2%})"
+                    )
+                else:
+                    logger.warning(
+                        f"[DISPUTE CREATE] No good match found "
+                        f"(best: {best_similarity:.2%}, threshold: 0.80)"
+                    )
+            
+            except Exception as e:
+                logger.warning(f"[DISPUTE CREATE] Error matching claim: {e}")
+        
+        # ✅ Store original verification result SEBELUM update
+        original_label = None
+        original_confidence = None
+        
+        if claim and hasattr(claim, 'verification_result'):
+            vr = claim.verification_result
+            original_label = vr.label
+            original_confidence = vr.confidence
+            logger.info(
+                f"[DISPUTE CREATE] Storing original verification: "
+                f"label={original_label}, confidence={original_confidence}"
+            )
+        
+        # Create dispute
         try:
-            # Simpan original verification result jika ada
-            original_label = ''
-            original_confidence = None
-            
-            if claim_obj and hasattr(claim_obj, 'verification_result'):
-                vr = claim_obj.verification_result
-                original_label = vr.label
-                original_confidence = vr.confidence
-            
             dispute = Dispute.objects.create(
-                claim=claim_obj,
-                claim_text=claim_text,
-                user_feedback=data['reason'],
-                reporter_name=data.get('reporter_name', 'Anonymous'),
-                reporter_email=data.get('reporter_email', ''),
-                supporting_doi=data.get('supporting_doi', ''),
-                supporting_url=data.get('supporting_url', ''),
+                claim=claim,  # ✅ Bisa None jika tidak ada match
+                claim_text=claim_text or (claim.text if claim else ''),
+                reason=validated_data['reason'],
+                reporter_name=validated_data.get('reporter_name', 'Anonymous'),
+                reporter_email=validated_data.get('reporter_email', ''),
+                supporting_doi=validated_data.get('supporting_doi', ''),
+                supporting_url=validated_data.get('supporting_url', ''),
+                supporting_file=validated_data.get('supporting_file'),
                 original_label=original_label,
                 original_confidence=original_confidence
             )
             
             logger.info(f"[DISPUTE CREATE] Created dispute ID: {dispute.id}")
             
-            # Kirim email ke admin
+            # Send admin notification
             try:
                 email_service.notify_admin_new_dispute(dispute)
             except Exception as e:
                 logger.error(f"[DISPUTE CREATE] Failed to send admin notification: {e}")
             
-            return Response({
-                'status': True,
-                'message': 'Dispute created successfully',
-                'dispute': {
+            return Response(
+                {
                     'id': dispute.id,
-                    'status': dispute.status,
-                    'created_at': dispute.created_at.isoformat()
-                }
-            }, status=status.HTTP_201_CREATED)
+                    'message': 'Dispute created successfully',
+                    'claim_linked': claim is not None
+                },
+                status=status.HTTP_201_CREATED
+            )
         
         except Exception as e:
-            logger.error(f"[DISPUTE CREATE] Error: {str(e)}", exc_info=True)
-            return Response({
-                'status': False,
-                'message': 'Failed to create dispute'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
+            logger.error(f"[DISPUTE CREATE] Error creating dispute: {e}", exc_info=True)
+            return Response(
+                {'error': 'Failed to create dispute'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+            
 class DisputeListView(APIView):
     """GET endpoint untuk list dispute"""
 
@@ -841,3 +1045,53 @@ class DisputeDetailView(APIView):
             return Response({
                 'error': 'Failed to fetch dispute details'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+@api_view(['POST'])
+def check_claim_duplicate(request):
+    """
+    Check if incoming claim is duplicate/similar to existing claims
+    """
+    text = request.data.get('text', '')
+    
+    if not text:
+        return Response(
+            {'error': 'Text is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Get all existing claims
+    existing_claims = Claim.objects.values('id', 'text', 'text_normalized')
+    existing_list = [
+        (c['id'], c['text'], c['text_normalized']) 
+        for c in existing_claims
+    ]
+    
+    # Find similar claims
+    matcher = ClaimSimilarityMatcher()
+    result = matcher.find_duplicates(text, existing_list)
+    
+    return Response({
+        'text': text,
+        'normalized': normalize_claim_text(text),
+        'is_duplicate': result['match_found'],
+        'match_level': result['match_level'],
+        'matched_claim_id': result['claim_id'],
+        'similarity_score': round(result['similarity'], 3),
+        'explanation': _get_explanation(result['similarity']),
+        'all_matches': [
+            {'id': m[0], 'similarity': round(m[1], 3)} 
+            for m in result.get('all_matches', [])[:5]
+        ]
+    })
+
+
+def _get_explanation(similarity: float) -> str:
+    """Helper function untuk penjelasan"""
+    if similarity >= 0.95:
+        return "Sangat mirip (kemungkinan besar duplikat)"
+    elif similarity >= 0.85:
+        return "Mirip (kemungkinan variasi dari klaim yang sama)"
+    elif similarity >= 0.75:
+        return "Agak mirip (mungkin topik yang sama)"
+    else:
+        return "Tidak mirip"

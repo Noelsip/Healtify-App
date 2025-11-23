@@ -99,10 +99,10 @@ def determine_verification_label(confidence_score: float, has_sources: bool = Tr
     Menentukan label verifikasi berdasarkan confidence dan sumber.
     
     Label Rules:
-    1. TIDAK TERVERIFIKASI: Jika bukan topik kesehatan atau tidak ada sumber
-    2. FAKTA: confidence >= 0.75 dan ada sumber jurnal
-    3. HOAX: confidence >= 0 dan <= 0.55 dan ada sumber jurnal
-    4. TIDAK PASTI: confidence > 0.55 dan < 0.75 dan ada sumber jurnal
+    1. TIDAK TERVERIFIKASI: Jika bukan topik kesehatan atau tidak ada jurnal
+    2. FAKTA (valid): confidence >= 0.75 dan ada sumber jurnal
+    3. HOAX: confidence <= 0.5 dan ada sumber jurnal
+    4. TIDAK PASTI (uncertain): 0.5 < confidence < 0.75 dan ada sumber jurnal
     """
     try:
         c = float(confidence_score)
@@ -122,8 +122,8 @@ def determine_verification_label(confidence_score: float, has_sources: bool = Tr
         logger.info(f"[LABEL] Claim tidak berkaitan dengan kesehatan -> TIDAK TERVERIFIKASI")
         return 'unverified'
     
-    # Rule 2: TIDAK TERVERIFIKASI jika tidak ada sumber
-    if not has_sources or not has_journal:
+    # Rule 2: TIDAK TERVERIFIKASI jika tidak ada jurnal
+    if not has_journal:
         logger.info(f"[LABEL] Tidak ada sumber jurnal -> TIDAK TERVERIFIKASI")
         return 'unverified'
     
@@ -132,13 +132,13 @@ def determine_verification_label(confidence_score: float, has_sources: bool = Tr
         logger.info(f"[LABEL] Confidence {c:.2f} >= 0.75 -> FAKTA")
         return 'valid'
     
-    # Rule 4: HOAX jika confidence <= 0.55
-    if c <= 0.55:
-        logger.info(f"[LABEL] Confidence {c:.2f} <= 0.55 -> HOAX")
+    # Rule 4: HOAX jika confidence <= 0.5
+    if c <= 0.5:
+        logger.info(f"[LABEL] Confidence {c:.2f} <= 0.5 -> HOAX")
         return 'hoax'
     
-    # Rule 5: TIDAK PASTI jika 0.55 < confidence < 0.75
-    logger.info(f"[LABEL] Confidence {c:.2f} between 0.55-0.75 -> TIDAK PASTI")
+    # Rule 5: TIDAK PASTI jika 0.5 < confidence < 0.75
+    logger.info(f"[LABEL] Confidence {c:.2f} between 0.5-0.75 -> TIDAK PASTI")
     return 'uncertain'
 
 def map_ai_label_to_backend(ai_label: str) -> str:
@@ -223,13 +223,13 @@ def normalize_ai_response(ai_result: Dict[str, Any], claim_text: str = "") -> Di
     else:
         combined_summary = original_summary or "Tidak ada sumber pendukung ditemukan."
     
-    # Detect journal presence
+    # Detect journal presence (DOI atau source_type = journal)
     has_journal = any(
         (s.get('doi') or '').strip() or s.get('source_type') == 'journal'
         for s in sources
     )
     
-    # Determine final label
+    # Determine final label berdasarkan aturan yang BENAR
     final_label = determine_verification_label(
         confidence_score=confidence,
         has_sources=bool(sources),
@@ -238,9 +238,12 @@ def normalize_ai_response(ai_result: Dict[str, Any], claim_text: str = "") -> Di
         summary=combined_summary
     )
     
+    # PENTING: Jika label adalah unverified, set confidence ke None
+    final_confidence = confidence if final_label != 'unverified' else None
+    
     return {
         'label': final_label,
-        'confidence': confidence if final_label != 'unverified' else None,
+        'confidence': final_confidence,
         'summary': combined_summary,
         'sources': sources,
         '_original_label': raw_label,
@@ -442,21 +445,13 @@ def call_ai_verify_direct_optimized(claim_text: str) -> Dict[str, Any]:
                 enable_fetch=not is_simple,
                 debug=False
             )
-        elif hasattr(pvo, 'verify_claim_local'):
-            logger.debug("Using verify_claim_local (original)")
-            raw_result = pvo.verify_claim_local(
-                claim=claim_text,
-                k=10,
-                enable_expansion=not is_simple,
-                force_dynamic_fetch=False,
-                debug_retrieval=False
-            )
         else:
-            raise AttributeError("No verify function found in module")
+            raise AttributeError("verify_claim_v2 function not found")
         
+        # Extract results dengan safe defaults
         label = map_ai_label_to_backend(raw_result.get("label", "unverified"))
         summary = raw_result.get("summary", "")
-        confidence = float(raw_result.get("confidence", 0.0))
+        confidence = float(raw_result.get("confidence") or 0.0)
         sources = extract_sources(raw_result)
         
         elapsed = time.time() - start_time
@@ -479,52 +474,40 @@ def call_ai_verify_direct_optimized(claim_text: str) -> Dict[str, Any]:
             "_claim_text": claim_text
         }
         
+    except (NameError, AttributeError, ModuleNotFoundError) as e:
+        elapsed = time.time() - start_time
+        logger.error(
+            f"❌ Module/Attribute error after {elapsed:.1f}s: {e}",
+            exc_info=True
+        )
+        # Fallback: return unverified result
+        return {
+            "label": "unverified",
+            "summary": f"Verification system error: {str(e)[:100]}",
+            "confidence": None,
+            "sources": [],
+            "_error": True,
+            "_processing_time": elapsed
+        }
+    
     except Exception as e:
         elapsed = time.time() - start_time
         logger.error(f"❌ Direct call failed after {elapsed:.1f}s: {e}", exc_info=True)
         
-        logger.info("⚠️  Falling back to subprocess method")
-        return call_ai_verify_subprocess(claim_text)
-
+        return {
+            "label": "unverified",
+            "summary": f"Verification failed: {str(e)[:100]}",
+            "confidence": None,
+            "sources": [],
+            "_error": True,
+            "_processing_time": elapsed
+        }
+        
 def call_ai_verify_subprocess(claim_text: str) -> Dict[str, Any]:
     """
-    Subprocess fallback method.
+    Subprocess fallback method - fallback implementation.
     """
-    # Implementation remains the same...
-    pass
-
-# ===========================
-# Translation Helper
-# ===========================
-
-def translate_to_english(text: str) -> str:
-    """
-    Translate Indonesian text to English for better international journal search.
-    """
-    try:
-        from google import genai
-        client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-        
-        prompt = (
-            f"Translate the following health claim to English. "
-            f"Use medical terminology when appropriate:\n\n"
-            f'"{text}"\n\n'
-            f"Output only the English translation."
-        )
-        
-        resp = client.models.generate_content(
-            model="gemini-2.5-flash-lite",
-            contents=prompt,
-            config={"temperature": 0.0, "max_output_tokens": 200}
-        )
-        
-        translated = resp.text.strip() if hasattr(resp, 'text') else text
-        logger.info(f"[TRANSLATE] ID: {text[:50]}... -> EN: {translated[:50]}...")
-        return translated
-        
-    except Exception as e:
-        logger.error(f"[TRANSLATE] Failed: {e}")
-        return text
+    raise NotImplementedError("Subprocess method not fully implemented - use direct method")
 
 # ===========================
 # Public API
@@ -549,7 +532,7 @@ def call_ai_verify(claim_text: str) -> Dict[str, Any]:
         logger.info("🎯 Attempting direct import method...")
         result = call_ai_verify_direct_optimized(claim_text)
         
-        # Normalize response
+        # Normalize response dengan aturan label yang BENAR
         normalized = normalize_ai_response(result, claim_text=claim_text)
         
         logger.info(f"✅ Verification successful via {result.get('_method', 'unknown')}")

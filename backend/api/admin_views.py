@@ -1,18 +1,24 @@
-import logging
+from typing import Dict, Any, List
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from .email_service import email_service
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
-from rest_framework_simplejwt.tokens import RefreshToken  
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from django.contrib.auth.hashers import make_password
 from django.db.models import Count
 from django.db import transaction
 from django.utils import timezone
-from .models import Claim, Source, Dispute, VerificationResult
+from django.http import Http404
+
+# IMPORT MODELS 
+from .models import Claim, Source, Dispute, VerificationResult, ClaimSource
 from .permissions import IsAdminOrReadOnly, IsSuperAdminOnly
+from .serializers import DisputeDetailSerializer, DisputeReviewSerializer
+from .email_service import email_service
+from .ai_adapter import call_ai_verify, normalize_ai_response
+
+import logging
 
 logger = logging.getLogger(__name__)
 
@@ -265,12 +271,20 @@ class AdminDisputeListView(APIView):
                     'id': dispute.id,
                     'claim_id': dispute.claim.id if dispute.claim else None,
                     'claim_text': dispute.claim_text,
-                    'user_feedback': dispute.user_feedback,
+                    'reason': dispute.reason,  
+                    'reporter_name': dispute.reporter_name,
+                    'reporter_email': dispute.reporter_email,
                     'status': dispute.status,
-                    'original_label': dispute.original_label,
+                    'status_display': dispute.get_status_display(),
+                    'supporting_doi': dispute.supporting_doi,
+                    'supporting_url': dispute.supporting_url,
+                    'supporting_file': bool(dispute.supporting_file),
                     'created_at': dispute.created_at.isoformat(),
-                    'resolved_at': dispute.resolved_at.isoformat() if dispute.resolved_at else None,
-                    'admin_notes': dispute.admin_notes
+                    'reviewed_at': dispute.reviewed_at.isoformat() if dispute.reviewed_at else None,  
+                    'reviewed_by': dispute.reviewed_by.username if dispute.reviewed_by else None,
+                    'review_note': dispute.review_note,  
+                    'original_label': dispute.original_label,
+                    'original_confidence': dispute.original_confidence
                 })
 
             logger.info(f"[ADMIN_DISPUTE_LIST] Disputes fetched by {request.user.username}")
@@ -289,132 +303,327 @@ class AdminDisputeListView(APIView):
 class AdminDisputeDetailView(APIView):
     """
     GET /api/admin/disputes/<id>/
-    POST /api/admin/disputes/<id>/action/
+    POST /api/admin/disputes/<id>/
+    
+    GET: Fetch detail single dispute
+    POST: Approve/Reject dispute dan update verification result
     """
     permission_classes = [IsAuthenticated, IsAdminOrReadOnly]
 
-    # ...existing get method...
-
-    @transaction.atomic
-    def post(self, request, dispute_id):
-        """Resolve dispute (approve/reject) dengan email notification"""
+    def get(self, request, dispute_id):
+        """Get detail satu dispute"""
         try:
-            dispute = Dispute.objects.select_related('claim').get(id=dispute_id)
+            dispute = Dispute.objects.select_related(
+                'claim', 
+                'reviewed_by'
+            ).get(id=dispute_id)
             
-            if dispute.status != 'pending':
-                return Response({
-                    'error': f'Dispute already {dispute.status}. Cannot process again.'
-                }, status=status.HTTP_400_BAD_REQUEST)
+            serializer = DisputeDetailSerializer(
+                dispute,
+                context={'request': request}
+            )
             
-            action = request.data.get('action')
-            admin_notes = request.data.get('admin_notes', '')
-            new_label = request.data.get('new_label', None)
+            logger.info(f"[ADMIN_DISPUTE_DETAIL] Fetched dispute {dispute_id} by {request.user.username}")
             
-            if action not in ['approve', 'reject']:
-                return Response({
-                    'error': 'Invalid action. Must be "approve" or "reject"'
-                }, status=status.HTTP_400_BAD_REQUEST)
-            
-            # Update dispute
-            dispute.status = action + 'd'
-            dispute.admin_notes = admin_notes
-            dispute.resolved_at = timezone.now()
-            dispute.reviewed = True
-            dispute.reviewed_by = request.user
-            dispute.save()
-            
-            response_data = {
-                'message': f'Dispute {action}d successfully',
-                'dispute': {
-                    'id': dispute.id,
-                    'status': dispute.status,
-                    'resolved_at': dispute.resolved_at.isoformat()
-                }
-            }
-            
-            # Update verification jika APPROVE
-            if action == 'approve' and dispute.claim:
-                try:
-                    if hasattr(dispute.claim, 'verification_result'):
-                        verification = dispute.claim.verification_result
-                        old_label = verification.label
-                        old_confidence = verification.confidence
-                        
-                        if new_label:
-                            updated_label = new_label
-                        else:
-                            updated_label = self._analyze_feedback_for_label(
-                                dispute.user_feedback, 
-                                old_label
-                            )
-                        
-                        verification.label = updated_label
-                        verification.confidence = 0.95
-                        verification.save()
-                        
-                        response_data['verification_updated'] = {
-                            'claim_id': dispute.claim.id,
-                            'old_label': old_label,
-                            'old_confidence': float(old_confidence) if old_confidence else None,
-                            'new_label': updated_label,
-                            'new_confidence': 0.95
-                        }
-                        
-                        logger.info(
-                            f"[ADMIN_DISPUTE_APPROVE] Updated claim #{dispute.claim.id} "
-                            f"verification: {old_label} → {updated_label}"
-                        )
-                    else:
-                        # Create new verification if doesn't exist
-                        new_label_determined = new_label or self._analyze_feedback_for_label(
-                            dispute.user_feedback, 
-                            dispute.original_label
-                        )
-                        
-                        VerificationResult.objects.create(
-                            claim=dispute.claim,
-                            label=new_label_determined,
-                            confidence=0.95,
-                            summary="Updated by admin after dispute approval",
-                        )
-                        
-                        response_data['verification_created'] = {
-                            'claim_id': dispute.claim.id,
-                            'label': new_label_determined,
-                            'confidence': 0.95
-                        }
-                        
-                except Exception as e:
-                    logger.error(
-                        f"[ADMIN_DISPUTE_APPROVE] Failed to update verification: {str(e)}", 
-                        exc_info=True
-                    )
-                    raise
-            
-            # ✅ KIRIM EMAIL KE USER (NEW FEATURE)
-            try:
-                if action == 'approve':
-                    email_service.notify_user_dispute_approved(dispute, admin_notes)
-                else:  # reject
-                    email_service.notify_user_dispute_rejected(dispute, admin_notes)
-            except Exception as e:
-                logger.error(f"[ADMIN_DISPUTE_ACTION] Failed to send user notification: {e}")
-                # Don't fail the request if email fails
-            
-            logger.info(f"[ADMIN_DISPUTE_ACTION] Dispute {dispute_id} {action}ed by {request.user.username}")
-            
-            return Response(response_data, status=status.HTTP_200_OK)
+            return Response(serializer.data, status=status.HTTP_200_OK)
             
         except Dispute.DoesNotExist:
+            logger.warning(f"[ADMIN_DISPUTE_DETAIL] Dispute {dispute_id} not found")
             return Response({
                 'error': 'Dispute not found'
             }, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
-            logger.error(f"[ADMIN_DISPUTE_ACTION] Error: {str(e)}", exc_info=True)
+            logger.error(f"[ADMIN_DISPUTE_DETAIL] Error: {str(e)}", exc_info=True)
             return Response({
-                'error': 'Failed to process dispute action'
+                'error': 'Failed to fetch dispute details'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    @transaction.atomic
+    def post(self, request, dispute_id):
+        """
+        Approve/Reject dispute dengan opsi:
+        1. Re-verify otomatis (menggunakan AI)
+        2. Manual update verification result
+        3. Keduanya
+        """
+        try:
+            # Validate request data
+            serializer = DisputeReviewSerializer(data=request.data)
+            if not serializer.is_valid():
+                logger.warning(f"[ADMIN_DISPUTE_REVIEW] Invalid data: {serializer.errors}")
+                return Response(
+                    serializer.errors,
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            validated_data = serializer.validated_data
+            
+            # Fetch dispute
+            dispute = Dispute.objects.select_related('claim').get(id=dispute_id)
+            
+            # Check if already reviewed
+            if dispute.status != Dispute.STATUS_PENDING:
+                logger.warning(f"[ADMIN_DISPUTE_REVIEW] Dispute {dispute_id} already {dispute.status}")
+                return Response({
+                    'error': f'Dispute sudah {dispute.status}. Tidak bisa diubah.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            action = validated_data['action']
+            review_note = validated_data.get('review_note', '')
+            
+            logger.info(f"[ADMIN_DISPUTE_REVIEW] Processing {action} for dispute {dispute_id}")
+            
+            # ====== HANDLE APPROVE ======
+            if action == 'approve':
+                result = self._handle_approve(
+                    dispute=dispute,
+                    request=request,
+                    review_note=review_note,
+                    manual_update=validated_data.get('manual_update', False),
+                    re_verify=validated_data.get('re_verify', True),
+                    new_label=validated_data.get('new_label'),
+                    new_confidence=validated_data.get('new_confidence'),
+                    new_summary=validated_data.get('new_summary')
+                )
+                
+            # ====== HANDLE REJECT ======
+            else:  # action == 'reject'
+                result = self._handle_reject(
+                    dispute=dispute,
+                    request=request,
+                    review_note=review_note
+                )
+            
+            return Response(result, status=status.HTTP_200_OK)
+            
+        except Dispute.DoesNotExist:
+            logger.error(f"[ADMIN_DISPUTE_REVIEW] Dispute {dispute_id} not found")
+            return Response({
+                'error': 'Dispute not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            logger.error(f"[ADMIN_DISPUTE_REVIEW] Error: {str(e)}", exc_info=True)
+            return Response({
+                'error': 'Failed to review dispute',
+                'detail': str(e) if settings.DEBUG else None
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def _handle_approve(self, dispute: Dispute, request, review_note: str,
+                       manual_update: bool = False, re_verify: bool = True,
+                       new_label: str = None, new_confidence: float = None,
+                       new_summary: str = None) -> Dict[str, Any]:
+        """
+        Handle dispute approval dengan update verification result.
+        
+        Flow:
+        1. Jika manual_update: update langsung dengan data yang diberikan
+        2. Jika re_verify: panggil AI untuk re-verify dengan data baru
+        3. Update dispute status
+        4. Kirim email ke user
+        """
+        logger.info(f"[APPROVE] Starting approval for dispute {dispute.id}")
+        
+        # Update dispute status
+        dispute.status = Dispute.STATUS_APPROVED
+        dispute.reviewed = True
+        dispute.reviewed_by = request.user
+        dispute.reviewed_at = timezone.now()
+        dispute.review_note = review_note
+        dispute.save()
+        
+        logger.info(f"[APPROVE] Dispute {dispute.id} status updated to APPROVED")
+        
+        # Get or create verification result
+        if dispute.claim:
+            verification, created = VerificationResult.objects.get_or_create(
+                claim=dispute.claim
+            )
+            
+            # ====== MANUAL UPDATE ======
+            if manual_update and new_label and new_confidence is not None:
+                logger.info(f"[APPROVE] Manual update: label={new_label}, conf={new_confidence}")
+                
+                verification.label = new_label
+                verification.confidence = new_confidence if new_label != 'unverified' else None
+                verification.summary = new_summary or verification.summary
+                verification.reviewer_notes = f"Admin approved dispute #{dispute.id}\n{review_note}"
+                verification.save()
+                
+                logger.info(f"[APPROVE] VerificationResult {verification.id} updated manually")
+                
+                updated_via = "manual_admin_update"
+                final_label = new_label
+                final_confidence = new_confidence
+                final_summary = new_summary
+            
+            # ====== RE-VERIFY WITH AI ======
+            elif re_verify:
+                logger.info(f"[APPROVE] Re-verifying claim with AI...")
+                
+                try:
+                    # Call AI dengan claim text terbaru
+                    ai_result = call_ai_verify(dispute.claim.text)
+                    normalized = normalize_ai_response(ai_result, claim_text=dispute.claim.text)
+                    
+                    logger.info(f"[APPROVE] AI re-verify result: {normalized['label']}")
+                    
+                    # Update verification result dengan hasil AI baru
+                    verification.label = normalized['label']
+                    verification.confidence = normalized['confidence']
+                    verification.summary = normalized['summary']
+                    verification.reviewer_notes = f"Admin approved dispute #{dispute.id} with re-verification\n{review_note}"
+                    verification.save()
+                    
+                    # Update sources jika ada
+                    if normalized['sources']:
+                        self._update_claim_sources(dispute.claim, normalized['sources'])
+                    
+                    logger.info(f"[APPROVE] VerificationResult {verification.id} updated with AI re-verify")
+                    
+                    updated_via = "ai_reverify"
+                    final_label = normalized['label']
+                    final_confidence = normalized['confidence']
+                    final_summary = normalized['summary']
+                    
+                except Exception as e:
+                    logger.error(f"[APPROVE] AI re-verify failed: {str(e)}")
+                    # Fallback: gunakan manual data jika ada, atau keep original
+                    if manual_update and new_label:
+                        verification.label = new_label
+                        verification.confidence = new_confidence if new_label != 'unverified' else None
+                        verification.summary = new_summary or verification.summary
+                    verification.reviewer_notes = f"Admin approved dispute #{dispute.id} (AI re-verify failed)\n{review_note}"
+                    verification.save()
+                    
+                    updated_via = "manual_fallback"
+                    final_label = verification.label
+                    final_confidence = verification.confidence
+                    final_summary = verification.summary
+            
+            else:
+                # Neither manual nor re-verify - keep original
+                updated_via = "no_update"
+                final_label = verification.label
+                final_confidence = verification.confidence
+                final_summary = verification.summary
+        
+        else:
+            # Dispute tidak linked ke claim - hanya update dispute
+            logger.warning(f"[APPROVE] Dispute {dispute.id} not linked to any claim")
+            updated_via = "no_claim"
+            final_label = dispute.original_label
+            final_confidence = dispute.original_confidence
+            final_summary = ""
+        
+        # ====== SEND EMAIL NOTIFICATION ======
+        email_sent = False
+        if dispute.reporter_email:
+            try:
+                email_sent = email_service.notify_user_dispute_approved(
+                    dispute=dispute,
+                    admin_notes=review_note
+                )
+                logger.info(f"[APPROVE] Email sent to {dispute.reporter_email}")
+            except Exception as e:
+                logger.error(f"[APPROVE] Failed to send email: {str(e)}")
+        
+        logger.info(f"[APPROVE] Dispute {dispute.id} approval completed")
+        
+        return {
+            'message': f'Dispute #{dispute.id} telah di-approve',
+            'dispute_id': dispute.id,
+            'status': dispute.status,
+            'updated_via': updated_via,
+            'verification_update': {
+                'label': final_label,
+                'confidence': final_confidence,
+                'summary': final_summary[:200] + '...' if final_summary and len(final_summary) > 200 else final_summary
+            },
+            'email_sent': email_sent,
+            'reviewed_at': dispute.reviewed_at.isoformat() if dispute.reviewed_at else None
+        }
+
+    def _handle_reject(self, dispute: Dispute, request, review_note: str) -> Dict[str, Any]:
+        """
+        Handle dispute rejection - tidak ada perubahan ke verification result.
+        """
+        logger.info(f"[REJECT] Starting rejection for dispute {dispute.id}")
+        
+        # Update dispute status
+        dispute.status = Dispute.STATUS_REJECTED
+        dispute.reviewed = True
+        dispute.reviewed_by = request.user
+        dispute.reviewed_at = timezone.now()
+        dispute.review_note = review_note
+        dispute.save()
+        
+        logger.info(f"[REJECT] Dispute {dispute.id} status updated to REJECTED")
+        
+        # ====== SEND EMAIL NOTIFICATION ======
+        email_sent = False
+        if dispute.reporter_email:
+            try:
+                email_sent = email_service.notify_user_dispute_rejected(
+                    dispute=dispute,
+                    admin_notes=review_note
+                )
+                logger.info(f"[REJECT] Email sent to {dispute.reporter_email}")
+            except Exception as e:
+                logger.error(f"[REJECT] Failed to send email: {str(e)}")
+        
+        logger.info(f"[REJECT] Dispute {dispute.id} rejection completed")
+        
+        return {
+            'message': f'Dispute #{dispute.id} telah di-reject',
+            'dispute_id': dispute.id,
+            'status': dispute.status,
+            'reason': 'Laporan ditolak. Verification result original tetap berlaku.',
+            'email_sent': email_sent,
+            'reviewed_at': dispute.reviewed_at.isoformat() if dispute.reviewed_at else None
+        }
+
+    def _update_claim_sources(self, claim: Claim, new_sources: List[Dict[str, Any]]):
+        """Update sources untuk klaim berdasarkan hasil AI."""
+        try:
+            # Clear existing sources
+            ClaimSource.objects.filter(claim=claim).delete()
+            logger.info(f"[SOURCES] Cleared old sources for claim {claim.id}")
+            
+            # Add new sources
+            for idx, source_data in enumerate(new_sources):
+                # Get or create source
+                doi = (source_data.get('doi') or '').strip()
+                url = (source_data.get('url') or '').strip()
+                
+                source = None
+                if doi:
+                    source = Source.objects.filter(doi=doi).first()
+                elif url:
+                    source = Source.objects.filter(url=url).first()
+                
+                if not source:
+                    source = Source.objects.create(
+                        title=source_data.get('title', 'Unknown')[:500],
+                        doi=doi if doi else None,
+                        url=url if url else None,
+                        source_type=source_data.get('source_type', 'journal'),
+                        credibility_score=source_data.get('relevance_score', 0.5)
+                    )
+                
+                # Create claim-source link
+                ClaimSource.objects.create(
+                    claim=claim,
+                    source=source,
+                    relevance_score=source_data.get('relevance_score', 0.0),
+                    excerpt=source_data.get('excerpt', ''),
+                    rank=idx
+                )
+            
+            logger.info(f"[SOURCES] Added {len(new_sources)} new sources for claim {claim.id}")
+        
+        except Exception as e:
+            logger.error(f"[SOURCES] Error updating sources: {str(e)}")
+            
 class AdminSourceListView(APIView):
     """
     GET /api/admin/sources/

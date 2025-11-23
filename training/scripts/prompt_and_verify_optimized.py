@@ -1,14 +1,3 @@
-"""
-Optimized Prompt & Verify v2 - Target: <30 detik
-Key optimizations:
-1. Parallel fetching dengan asyncio/threading
-2. Aggressive caching (embedding, LLM responses, fetch results)
-3. Early exit strategies
-4. Batch embedding
-5. Simplified relevance scoring (no LLM call)
-6. Connection pooling untuk database
-"""
-
 import os
 import re
 import json
@@ -19,6 +8,7 @@ import pathlib
 import argparse
 import sys
 import traceback
+import logging
 from typing import List, Dict, Any, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from functools import lru_cache
@@ -30,6 +20,11 @@ from psycopg2.extras import RealDictCursor
 from psycopg2 import pool
 from pgvector.psycopg2 import register_vector
 
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(levelname)s] %(asctime)s %(name)s %(message)s'
+)
+logger = logging.getLogger(__name__)
 # ============================================
 # CONFIGURATION - TUNED FOR SPEED
 # ============================================
@@ -154,23 +149,34 @@ fetch_cache = FastCache(max_size=100, ttl=CACHE_TTL * 2)
 # UTILITY FUNCTIONS
 # ============================================
 
-def safe_strip(s) -> str:
-    return str(s).strip() if s else ""
 
+def safe_strip(s) -> str:
+    """Konversi ke string dan strip dengan aman."""
+    try:
+        return str(s).strip() if s else ""
+    except Exception:
+        return ""
+    
 def text_hash(text: str) -> str:
-    return hashlib.sha256(text.strip().lower().encode()).hexdigest()[:24]
+    """Generate hash untuk text."""
+    return hashlib.sha256(text.encode()).hexdigest()[:24]
 
 def extract_llm_text(resp) -> str:
+    """Ekstrak teks dari berbagai format respons Gemini API."""
     try:
-        if hasattr(resp, "text"):
-            return resp.text or ""
+        if hasattr(resp, "text") and resp.text:
+            return resp.text
         if hasattr(resp, "candidates") and resp.candidates:
-            c = resp.candidates[0]
-            if hasattr(c, "content") and hasattr(c.content, "parts"):
-                return c.content.parts[0].text or ""
-        return str(resp) if resp else ""
-    except:
-        return ""
+            if hasattr(resp.candidates[0], "content"):
+                if hasattr(resp.candidates[0].content, "parts"):
+                    if resp.candidates[0].content.parts:
+                        if hasattr(resp.candidates[0].content.parts[0], "text"):
+                            return resp.candidates[0].content.parts[0].text
+    except Exception as e:
+        logger.warning(f"[EXTRACT_TEXT] Error: {e}")
+    
+    return str(resp) if resp else ""
+
 
 # ============================================
 # OPTIMIZED EMBEDDING (BATCH + CACHE)
@@ -250,24 +256,15 @@ def extract_keywords(text: str) -> frozenset:
     return frozenset(re.findall(r'[a-zA-Zà-ÿ]{4,}', text.lower()))
 
 def compute_relevance_fast(claim: str, text: str, title: str = "") -> float:
-    """Ultra-fast relevance tanpa LLM."""
-    claim_kw = extract_keywords(claim)
-    text_kw = extract_keywords(text + " " + title)
+    """Ultra-fast relevance scoring."""
+    claim_tokens = set(re.findall(r'\w+', claim.lower()))
+    text_tokens = set(re.findall(r'\w+', (text + " " + title).lower()))
     
-    if not claim_kw:
+    if not claim_tokens:
         return 0.0
     
-    # Word overlap
-    overlap = len(claim_kw & text_kw)
-    overlap_score = overlap / len(claim_kw)
-    
-    # Medical keyword bonus
-    claim_medical = claim_kw & ALL_MEDICAL_KW
-    text_medical = text_kw & ALL_MEDICAL_KW
-    medical_overlap = len(claim_medical & text_medical)
-    medical_score = medical_overlap / max(len(claim_medical), 1) if claim_medical else 0
-    
-    return min(1.0, 0.6 * overlap_score + 0.4 * medical_score)
+    overlap = len(claim_tokens & text_tokens)
+    return min(1.0, overlap / len(claim_tokens))
 
 # ============================================
 # OPTIMIZED DATABASE RETRIEVAL
@@ -313,13 +310,69 @@ def retrieve_fast(query_emb: List[float], k: int = 10) -> List[Dict]:
         pool.putconn(conn)
 
 def retrieve_and_score(claim: str, k: int = 10) -> Tuple[List[Dict], float]:
-    """Single-pass retrieval + scoring."""
+    """Single-pass retrieval + scoring - WITH PRIORITY FOR UPDATED SOURCES."""
+    
+    # ✅ STEP 1: Check apakah claim ini sudah pernah di-approve dengan sources baru
+    claim_hash = text_hash(claim)
+    
+    # Query: find VerificationResult yang updated_at RECENT (dalam 24 jam terakhir)
+    # dengan label yang BERBEDA dari inference awal
+    try:
+        from django.utils import timezone
+        from datetime import timedelta
+        from api.models import Claim, VerificationResult, ClaimSource
+        
+        recent_claims = Claim.objects.filter(
+            text_hash=claim_hash,
+            verification_result__updated_at__gte=timezone.now() - timedelta(hours=24)
+        ).select_related('verification_result').prefetch_related('sources')
+        
+        for recent_claim in recent_claims:
+            vr = recent_claim.verification_result
+            sources = recent_claim.sources.all()
+            
+            logger.info(f"[RETRIEVE] Found recently updated claim {recent_claim.id}")
+            logger.info(f"           Label: {vr.label}, Confidence: {vr.confidence}")
+            logger.info(f"           Sources: {sources.count()} (updated at {vr.updated_at})")
+            
+            # ✅ Use updated sources instead of retrieval!
+            if sources.count() > 0:
+                updated_neighbors = []
+                for source_link in sources.all()[:10]:
+                    source = source_link.source
+                    updated_neighbors.append({
+                        "safe_id": source.doi or source.url or f"src_{source.id}",
+                        "title": source.title,
+                        "text": source.title,  # Fallback
+                        "doi": source.doi,
+                        "url": source.url,
+                        "source_type": source.source_type,
+                        "relevance_score": source_link.relevance_score,
+                        "snippet": source_link.excerpt,
+                        "_from_update": True,  # Mark as from approved update
+                        "similarity": 1.0  # Max similarity since admin approved
+                    })
+                
+                logger.info(f"[RETRIEVE] Using {len(updated_neighbors)} approved sources")
+                
+                # Compute quality dari updated sources
+                rel_scores = [n["relevance_score"] for n in updated_neighbors]
+                quality = sum(rel_scores) / len(rel_scores) if rel_scores else 0.5
+                
+                return updated_neighbors, quality
+    
+    except Exception as e:
+        logger.warning(f"[RETRIEVE] Error checking updates: {e}")
+    
+    # ✅ STEP 2: Normal retrieval jika tidak ada update
     emb = embed_batch_cached([claim])[0]
     neighbors = retrieve_fast(emb, k=k)
     
     if not neighbors:
+        logger.warning("[RETRIEVE] No neighbors found from DB")
         return [], 0.0
     
+    # Score neighbors
     for nb in neighbors:
         rel = compute_relevance_fast(claim, nb.get("text", ""), nb.get("safe_id", ""))
         sim = nb.get("similarity", 0)
@@ -434,6 +487,8 @@ def fetch_pubmed_fast(query: str, limit: int = 5) -> List[Dict]:
 
 def parallel_fetch_all(claim: str, limit_per_source: int = 5) -> List[Dict]:
     """Fetch dari semua source secara PARALLEL."""
+    
+    logger.info(f"[PARALLEL_FETCH] Fetching for: {claim[:60]}")
     # Check cache
     cache_key = f"fetch:{text_hash(claim)}"
     cached = fetch_cache.get(cache_key)
@@ -479,6 +534,8 @@ def create_virtual_neighbors(items: List[Dict], claim: str) -> List[Dict]:
     if not items:
         return []
     
+    logger.info(f"[VIRTUAL_NEIGHBORS] Creating from {len(items)} items")
+    
     # Prepare texts
     texts = []
     metas = []
@@ -489,107 +546,209 @@ def create_virtual_neighbors(items: List[Dict], claim: str) -> List[Dict]:
             metas.append(item)
     
     if not texts:
+        logger.warning("[VIRTUAL_NEIGHBORS] No valid texts found")
         return []
     
     # Batch embed
-    all_texts = [claim] + texts
-    embeddings = embed_batch_cached(all_texts)
-    
-    claim_emb = embeddings[0]
-    text_embs = embeddings[1:]
+    try:
+        all_texts = [claim] + texts
+        embeddings = embed_batch_cached(all_texts)
+        
+        claim_emb = embeddings[0]
+        text_embs = embeddings[1:]
+    except Exception as e:
+        logger.error(f"[VIRTUAL_NEIGHBORS] Embedding error: {e}")
+        return []
     
     # Score dan buat virtual neighbors
     virtual_neighbors = []
     for i, (text, meta, emb) in enumerate(zip(texts, metas, text_embs)):
         # Cosine similarity
         dot = sum(a*b for a, b in zip(claim_emb, emb))
-        norm_a = sum(a*a for a in claim_emb) ** 0.5
-        norm_b = sum(b*b for b in emb) ** 0.5
-        similarity = dot / (norm_a * norm_b) if norm_a and norm_b else 0
+        norm_a = (sum(a*a for a in claim_emb) ** 0.5) or 1.0
+        norm_b = (sum(b*b for b in emb) ** 0.5) or 1.0
         
-        rel = compute_relevance_fast(claim, text, meta.get("title", ""))
+        similarity = dot / (norm_a * norm_b) if norm_a and norm_b else 0.0
+        similarity = max(0.0, min(similarity, 1.0))
+        
+        # Compute relevance
+        relevance = compute_relevance_fast(claim, text, meta.get("title", ""))
         
         virtual_neighbors.append({
-            "doc_id": meta.get("doi") or f"virtual_{i}",
-            "safe_id": meta.get("doi") or f"virtual_{i}",
-            "text": text[:1500],
+            "safe_id": meta.get("doi", f"virtual_{i}"),
+            "title": meta.get("title", "Unknown"),
+            "text": text[:500],
+            "excerpt": text[:200],
             "doi": meta.get("doi", ""),
-            "distance": 1.0 - similarity,
+            "url": meta.get("url", ""),
             "similarity": similarity,
-            "relevance_score": 0.5 * similarity + 0.5 * rel,
-            "_virtual": True
+            "relevance_score": 0.6 * similarity + 0.4 * relevance,
+            "_from_update": False
         })
     
-    # Sort by score
+    # Sort by relevance descending
     virtual_neighbors.sort(key=lambda x: x["relevance_score"], reverse=True)
+    logger.info(f"[VIRTUAL_NEIGHBORS] Created {len(virtual_neighbors)} neighbors")
+    
     return virtual_neighbors
 
 # ============================================
 # SIMPLIFIED LLM VERIFICATION
 # ============================================
 
-PROMPT_TEMPLATE = """Anda sistem verifikasi fakta medis. Analisis klaim berdasarkan bukti.
+PROMPT_TEMPLATE = """Anda adalah sistem verifikasi fakta medis yang teliti dan objektif.
 
-KLAIM: "{claim}"
+KLAIM YANG DIVERIFIKASI:
+"{claim}"
 
-BUKTI:
+BUKTI ILMIAH YANG TERSEDIA:
 {evidence}
 
-Output JSON saja:
-{{"label": "VALID/HOAX/PARTIALLY_VALID", "confidence": 0.0-1.0, "summary": "penjelasan singkat"}}
+INSTRUKSI:
+1. Evaluasi bukti secara menyeluruh dan objektif
+2. Tentukan apakah klaim didukung, ditolak, atau sebagian benar berdasarkan bukti
+3. Pertimbangkan mekanisme biologis yang mendasari klaim
+4. Jika ada konflik dalam bukti, jelaskan nuansanya
+5. Berikan confidence score 0.0-1.0 yang realistis
 
-VALID = didukung bukti, HOAX = bertentangan, PARTIALLY_VALID = benar dalam kondisi tertentu."""
+OUTPUT FORMAT (JSON ONLY):
+{{
+    "label": "VALID atau HOAX atau UNCERTAIN",
+    "confidence": 0.0-1.0,
+    "summary": "Penjelasan singkat (2-3 kalimat) tentang verifikasi klaim"
+}}
+
+CATATAN:
+- VALID: Klaim didukung oleh bukti ilmiah yang kuat
+- HOAX: Klaim bertentangan dengan bukti yang ada
+- UNCERTAIN: Klaim sebagian benar atau terbatas pada kondisi tertentu
+- Output HANYA JSON, jangan ada teks tambahan
+"""
 
 def build_evidence_text(neighbors: List[Dict], max_chars: int = 2000) -> str:
+    """Build evidence string dari neighbors dengan smart truncation."""
+    if not neighbors:
+        return "No evidence found."
+    
     parts = []
     total = 0
+    
     for i, nb in enumerate(neighbors[:6], 1):
-        text = nb.get("text", "")[:350]
-        doi = nb.get("doi", "N/A")
-        part = f"[{i}] DOI:{doi}\n{text}\n"
-        if total + len(part) > max_chars:
+        title = nb.get("title", "Unknown")[:100]
+        relevance = nb.get("relevance_score", 0)
+        
+        # Build entry
+        entry = f"{i}. {title} (relevance: {relevance:.1%})"
+        
+        # Add snippet if available
+        snippet = nb.get("excerpt", nb.get("text", ""))
+        if snippet:
+            snippet = snippet[:300].strip()
+            if len(snippet) > 100:
+                snippet = snippet[:100] + "..."
+            entry += f"\n   Excerpt: \"{snippet}\""
+        
+        # Check if we have space
+        if total + len(entry) <= max_chars:
+            parts.append(entry)
+            total += len(entry)
+        else:
             break
-        parts.append(part)
-        total += len(part)
-    return "\n".join(parts)
+    
+    return "\n".join(parts) if parts else "No evidence excerpts available."
 
 def call_llm_cached(claim: str, neighbors: List[Dict]) -> Dict[str, Any]:
-    """LLM call dengan caching."""
-    # Build cache key from claim + top neighbor IDs
-    neighbor_ids = "_".join(n.get("safe_id", "")[:10] for n in neighbors[:3])
-    cache_key = f"llm:{text_hash(claim)}:{neighbor_ids}"
+    """LLM call dengan caching yang smart."""
     
+    # Build cache key
+    neighbor_ids = "_".join(
+        n.get("doi", n.get("safe_id", "")[:10]) 
+        for n in neighbors[:5]
+    )
+    has_approved_sources = any(n.get("_from_update") for n in neighbors)
+    cache_key = f"llm:{text_hash(claim)}:{hashlib.md5(neighbor_ids.encode()).hexdigest()[:12]}"
+    if has_approved_sources:
+        cache_key += ":approved"
+    
+    # Check cache
     cached = llm_cache.get(cache_key)
-    if cached:
-        print("[LLM] Cache hit!", file=sys.stderr)
+    if cached and not has_approved_sources:  
+        logger.info("[LLM] Cache hit (non-approved sources)")
         return cached
     
+    # Build evidence
     evidence_text = build_evidence_text(neighbors)
     prompt = PROMPT_TEMPLATE.format(claim=claim, evidence=evidence_text)
     
     try:
+        logger.info(f"[LLM] Calling Gemini with {len(neighbors)} sources")
+        logger.debug(f"      Cache key: {cache_key}")
+        
         client = get_gemini_client()
-        resp = client.models.generate_content(
-            model="gemini-2.5-flash-lite",
-            contents=prompt,
-            config={
-                "temperature": 0.0,
-                "max_output_tokens": 500,
-                "response_mime_type": "application/json"
+        
+        # ✅ FIX: Gunakan response_schema BUKAN generation_config
+        # atau gunakan parameter yang correct
+        try:
+            # Method 1: Newer API version (try first)
+            resp = client.models.generate_content(
+                model="gemini-2.5-flash-lite",
+                contents=prompt,
+                config={
+                    "temperature": 0.0,
+                    "max_output_tokens": 2000,
+                }
+            )
+        except TypeError:
+            # Method 2: Older API version fallback
+            logger.warning("[LLM] Using fallback API format")
+            import google.generativeai as genai
+            
+            model = genai.GenerativeModel(
+                "gemini-2.5-flash-lite",
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.0,
+                    max_output_tokens=2000
+                )
+            )
+            resp = model.generate_content(prompt)
+        
+        result_text = extract_llm_text(resp)
+        
+        # Parse JSON dengan error handling
+        try:
+            if result_text.startswith('{'):
+                parsed = json.loads(result_text)
+            else:
+                # Find JSON block
+                json_start = result_text.find('{')
+                json_end = result_text.rfind('}') + 1
+                if json_start >= 0 and json_end > json_start:
+                    parsed = json.loads(result_text[json_start:json_end])
+                else:
+                    raise ValueError("No JSON found in response")
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.warning(f"[LLM] JSON parse error: {e}")
+            parsed = {
+                "label": "inconclusive",
+                "confidence": 0.5,
+                "summary": result_text[:500] if result_text else "Verification inconclusive"
             }
-        )
         
-        text = extract_llm_text(resp)
-        text = text.replace("```json", "").replace("```", "").strip()
+        # Cache result
+        if not has_approved_sources:
+            llm_cache.set(cache_key, parsed)
         
-        result = json.loads(text)
-        llm_cache.set(cache_key, result)
-        return result
-        
+        logger.info(f"[LLM] Result: label={parsed.get('label')}, conf={parsed.get('confidence')}")
+        return parsed
+    
     except Exception as e:
-        print(f"[LLM] Error: {e}", file=sys.stderr)
-        return {"label": "inconclusive", "confidence": 0.0, "summary": str(e)}
-
+        logger.error(f"[LLM] Error: {e}", exc_info=True)
+        return {
+            "label": "inconclusive",
+            "confidence": 0.0,
+            "summary": f"Verification failed: {str(e)[:200]}"
+        }
+        
 # ============================================
 # MAIN VERIFICATION (OPTIMIZED FLOW)
 # ============================================
@@ -614,15 +773,21 @@ def verify_claim_v2(
     claim = safe_strip(claim)
     
     if not claim:
-        raise ValueError("Klaim kosong")
+        raise ValueError("Claim cannot be empty")
     
-    print(f"\n[V2] Verifying: {claim[:60]}...", file=sys.stderr)
+    logger.info(f"\n[V2] Verifying: {claim[:60]}...")
     
     # Step 1: Initial DB retrieval
     t1 = time.time()
-    print("[1/4] DB retrieval...", file=sys.stderr)
-    neighbors, quality = retrieve_and_score(claim, k=k)
-    print(f"      {len(neighbors)} neighbors, quality={quality:.3f} ({time.time()-t1:.1f}s)", file=sys.stderr)
+    logger.info("[1/4] DB retrieval...")
+    try:
+        neighbors, quality = retrieve_and_score(claim, k=k)
+        logger.info(
+            f"      {len(neighbors)} neighbors, quality={quality:.3f} ({time.time()-t1:.1f}s)"
+        )
+    except Exception as e:
+        logger.error(f"[RETRIEVE] Error: {e}")
+        neighbors, quality = [], 0.0
     
     # Step 2: Decide if we need fetch
     need_fetch = (
@@ -631,95 +796,94 @@ def verify_claim_v2(
     )
     
     if need_fetch:
+        logger.info(f"[2/4] Fetching from external sources (quality={quality:.3f})...")
         t2 = time.time()
-        print("[2/4] Parallel fetch...", file=sys.stderr)
-        
-        # Parallel fetch
-        fetched = parallel_fetch_all(claim, limit_per_source=6)
-        print(f"      Fetched {len(fetched)} items ({time.time()-t2:.1f}s)", file=sys.stderr)
-        
-        if fetched:
-            # Create virtual neighbors (NO DB ingest - much faster!)
-            t3 = time.time()
-            virtual = create_virtual_neighbors(fetched, claim)
-            print(f"      Created {len(virtual)} virtual neighbors ({time.time()-t3:.1f}s)", file=sys.stderr)
-            
-            # Merge with DB neighbors
-            if virtual:
-                # Combine and re-sort
-                all_neighbors = neighbors + virtual
-                all_neighbors.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
-                neighbors = all_neighbors[:MAX_NEIGHBORS_TO_PROCESS]
-                
-                # Recalculate quality
-                top_scores = [n["relevance_score"] for n in neighbors[:5]]
-                quality = sum(top_scores) / len(top_scores) if top_scores else 0
-                print(f"      New quality={quality:.3f}", file=sys.stderr)
+        try:
+            fetch_items = parallel_fetch_all(claim, limit_per_source=5)
+            virtual_neighbors = create_virtual_neighbors(fetch_items, claim)
+            neighbors.extend(virtual_neighbors)
+            logger.info(f"      Fetched {len(fetch_items)} items, created {len(virtual_neighbors)} neighbors ({time.time()-t2:.1f}s)")
+        except Exception as e:
+            logger.warning(f"[FETCH] Error: {e}, continuing with DB results")
     else:
-        print("[2/4] Skipping fetch (quality OK)", file=sys.stderr)
+        logger.info(f"[2/4] Skipping fetch (quality OK)")
     
     # Handle no results
     if not neighbors:
-        elapsed = time.time() - start
-        result = {
+        logger.warning("[VERIFY] No neighbors found, returning unverified")
+        return {
             "claim": claim,
-            "label": "inconclusive",
-            "confidence": 0.0,
-            "summary": "Tidak ditemukan bukti ilmiah yang relevan.",
-            "evidence": [],
-            "references": [],
-            "_meta": {"time": elapsed, "quality": 0}
+            "label": "unverified",
+            "confidence": None,
+            "summary": "Tidak ada sumber pendukung ditemukan untuk klaim ini.",
+            "sources": [],
+            "_processing_time": time.time() - start,
+            "_method": "empty_result"
         }
-        print(f"\n[V2] No results ({elapsed:.1f}s)", file=sys.stderr)
-        print("\n[JSON_OUTPUT]")
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-        return result
     
     # Step 3: LLM verification
     t4 = time.time()
-    print("[3/4] LLM verification...", file=sys.stderr)
+    logger.info("[3/4] LLM verification...")
     llm_result = call_llm_cached(claim, neighbors)
-    print(f"      Done ({time.time()-t4:.1f}s)", file=sys.stderr)
+    logger.info(f"      Done ({time.time()-t4:.1f}s)")
     
     # Step 4: Build response
-    print("[4/4] Building response...", file=sys.stderr)
+    logger.info("[4/4] Building response...")
     
     evidence = []
     references = []
     
     for nb in neighbors[:6]:
-        ev = {
-            "safe_id": nb.get("safe_id", ""),
-            "snippet": nb.get("text", "")[:300],
+        # Build evidence entry
+        evidence_entry = {
+            "safe_id": nb.get("safe_id", "unknown"),
+            "snippet": nb.get("excerpt", nb.get("text", ""))[:300],
             "doi": nb.get("doi", ""),
-            "relevance_score": round(nb.get("relevance_score", 0), 3)
+            "relevance_score": nb.get("relevance_score", 0)
         }
-        evidence.append(ev)
+        evidence.append(evidence_entry)
         
-        if nb.get("doi"):
-            references.append({
-                "safe_id": nb.get("safe_id", ""),
-                "doi": nb.get("doi"),
-                "url": f"https://doi.org/{nb['doi']}"
-            })
+        # Build reference entry
+        reference_entry = {
+            "safe_id": nb.get("safe_id", "unknown"),
+            "doi": nb.get("doi", ""),
+            "url": nb.get("url", f"https://doi.org/{nb.get('doi')}" if nb.get("doi") else "")
+        }
+        references.append(reference_entry)
     
-    # Normalize label
-    raw_label = llm_result.get("label", "inconclusive").upper()
-    label_map = {
-        "VALID": "true", "TRUE": "true", "BENAR": "true",
-        "HOAX": "false", "FALSE": "false", "SALAH": "false",
-        "PARTIALLY_VALID": "misleading", "PARTIAL": "misleading"
+    # Extract final label
+    raw_label = llm_result.get("label", "unverified").lower().strip()
+    label_mapping = {
+        "valid": "valid",
+        "true": "valid",
+        "hoax": "hoax",
+        "false": "hoax",
+        "uncertain": "uncertain",
+        "partially_valid": "uncertain",
+        "unverified": "unverified",
+        "inconclusive": "unverified"
     }
-    label = label_map.get(raw_label, "inconclusive")
+    final_label = label_mapping.get(raw_label, "unverified")
+    
+    # Extract confidence
+    try:
+        confidence = float(llm_result.get("confidence", 0.0))
+        if confidence > 1.0:
+            confidence /= 100.0
+        confidence = max(0.0, min(confidence, 1.0))
+        if final_label == "unverified":
+            confidence = None
+    except (TypeError, ValueError):
+        confidence = None if final_label == "unverified" else 0.5
     
     elapsed = time.time() - start
     
     result = {
         "claim": claim,
-        "label": label,
-        "confidence": float(llm_result.get("confidence", 0.0)),
+        "label": final_label,
+        "confidence": confidence,
         "summary": llm_result.get("summary", ""),
-        "evidence": evidence,
+        "sources": evidence,
         "references": references,
         "_meta": {
             "time": round(elapsed, 2),
@@ -733,9 +897,11 @@ def verify_claim_v2(
         }
     }
     
-    print(f"\n[V2] Complete: {label} ({result['confidence']:.0%}) in {elapsed:.1f}s", file=sys.stderr)
-    print("\n[JSON_OUTPUT]")
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    logger.info(
+        f"\n[V2] Complete: {final_label} "
+        f"(conf={f'{confidence*100:.0f}%' if confidence else 'N/A'}) "
+        f"in {elapsed:.1f}s\n"
+    )
     
     return result
 

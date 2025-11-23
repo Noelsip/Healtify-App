@@ -1,4 +1,6 @@
 from django.urls import path
+from . import views
+
 from .views import (
     ClaimVerifyView, 
     ClaimDetailView, 
@@ -34,6 +36,8 @@ urlpatterns = [
     path('verify/', ClaimVerifyView.as_view(), name='claim-verify'),
     path('claims/', ClaimListView.as_view(), name='claim-list'),
     path('claims/<int:claim_id>/', ClaimDetailView.as_view(), name='claim-detail'),
+    path('claims/check-duplicate/', views.check_claim_duplicate, name='check-duplicate'),
+
 
     # ===========================
     # Public Endpoints - Dispute
@@ -41,6 +45,8 @@ urlpatterns = [
     path('disputes/', DisputeListView.as_view(), name='dispute-list'),
     path('disputes/create/', DisputeCreateView.as_view(), name='dispute-create'),
     path('disputes/<int:dispute_id>/', DisputeDetailView.as_view(), name='dispute-detail'),
+    path('admin/disputes/', AdminDisputeListView.as_view(), name='admin-dispute-list'),
+    path('admin/disputes/<int:dispute_id>/', AdminDisputeDetailView.as_view(), name='admin-dispute-detail'),
     
     # ===========================
     # Admin Authentication

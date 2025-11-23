@@ -77,22 +77,42 @@ const AdminDisputes = () => {
         }
     };
 
-    const handleDisputeAction = async (action, adminNotes, newLabel = null) => {
+    const handleDisputeAction = async (action, adminNotes, newLabel = null, newConfidence = 0.85) => {
         const token = localStorage.getItem('adminToken');
         setActionLoading(true);
 
         try {
+            // ✅ MAPPING LABEL DARI FRONTEND KE BACKEND
+            const labelMap = {
+                'auto': null,
+                'TRUE': 'valid',
+                'FALSE': 'hoax',
+                'MIXTURE': 'uncertain'
+            };
+
+            const mappedLabel = labelMap[newLabel];
+
             const payload = {
                 action: action,
-                admin_notes: adminNotes
+                review_note: adminNotes  // ✅ UBAH: admin_notes → review_note
             };
             
-            // Tambahkan new_label jika ada
-            if (newLabel) {
-                payload.new_label = newLabel;
+            // Jika bukan auto, tambahkan manual update fields
+            if (newLabel && newLabel !== 'auto') {
+                payload.manual_update = true;
+                payload.re_verify = false;
+                payload.new_label = mappedLabel;
+                payload.new_confidence = newConfidence;
+                payload.new_summary = `Updated based on user dispute and admin review`;
+            } else if (action === 'approve') {
+                // Jika auto, gunakan re-verify
+                payload.re_verify = true;
+                payload.manual_update = false;
             }
 
-            const response = await fetch(`${BASE_URL}/admin/disputes/${selectedDispute.id}/action/`, {
+            console.log('📤 Payload yang dikirim ke backend:', payload);
+
+            const response = await fetch(`${BASE_URL}/admin/disputes/${selectedDispute.id}/`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -101,19 +121,24 @@ const AdminDisputes = () => {
                 body: JSON.stringify(payload)
             });
 
-            if (!response.ok) throw new Error('Failed to process dispute action');
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Failed to process dispute action');
+            }
 
             const data = await response.json();
             
             // Show detailed message
-            let message = data.message;
-            if (data.verification_updated) {
-                message += `\n\nVerification Updated:\n` +
-                    `${data.verification_updated.old_label} (${(data.verification_updated.old_confidence * 100).toFixed(1)}%) → ` +
-                    `${data.verification_updated.new_label} (${(data.verification_updated.new_confidence * 100).toFixed(1)}%)`;
-            } else if (data.verification_created) {
-                message += `\n\nVerification Created:\n` +
-                    `Label: ${data.verification_created.label} (${(data.verification_created.confidence * 100).toFixed(1)}%)`;
+            let message = data.message || `Dispute ${action}ed successfully`;
+            
+            if (data.verification_update) {
+                message += `\n\n✅ Verification Updated:\n` +
+                    `Label: ${data.verification_update.label}\n` +
+                    `Confidence: ${(data.verification_update.confidence * 100).toFixed(1)}%`;
+            }
+            
+            if (data.updated_via) {
+                message += `\n\n📊 Updated Via: ${data.updated_via.replace(/_/g, ' ')}`;
             }
             
             alert(message);
@@ -123,7 +148,7 @@ const AdminDisputes = () => {
             fetchDisputes(token);
         } catch (err) {
             console.error('Error processing dispute action:', err);
-            alert('Failed to process action');
+            alert(`Failed to process action: ${err.message}`);
         } finally {
             setActionLoading(false);
         }
@@ -224,7 +249,7 @@ const AdminDisputes = () => {
                                         Claim Text
                                     </th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        User Feedback
+                                        Reason {/* ✅ UBAH: User Feedback → Reason */}
                                     </th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                         Status
@@ -254,7 +279,7 @@ const AdminDisputes = () => {
                                                 <div className="truncate">{dispute.claim_text}</div>
                                             </td>
                                             <td className="px-6 py-4 text-sm text-gray-900 max-w-xs">
-                                                <div className="truncate">{dispute.user_feedback}</div>
+                                                <div className="truncate">{dispute.reason}</div> {/* ✅ UBAH: user_feedback → reason */}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap">
                                                 <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(dispute.status)}`}>
@@ -297,10 +322,45 @@ const AdminDisputes = () => {
         </div>
     );
 };
+
 // Dispute Modal Component with Label Selection
 const DisputeModal = ({ dispute, onClose, onAction, loading }) => {
     const [adminNotes, setAdminNotes] = useState('');
-    const [newLabel, setNewLabel] = useState('auto'); // 'auto', 'TRUE', 'FALSE', 'MIXTURE'
+    const [newLabel, setNewLabel] = useState('auto');
+    const [newConfidence, setNewConfidence] = useState(0.85);
+
+    // ✅ MAPPING LABEL DARI FRONTEND KE BACKEND
+    const labelMap = {
+        'auto': null,
+        'TRUE': 'valid',
+        'FALSE': 'hoax',
+        'MIXTURE': 'uncertain'
+    };
+
+    const handleApprove = () => {
+        if (!adminNotes.trim()) {
+            alert('Admin notes are required');
+            return;
+        }
+        
+        const mappedLabel = labelMap[newLabel];
+        console.log(`📋 Approve action triggered:`);
+        console.log(`   Label selection: ${newLabel} → ${mappedLabel}`);
+        console.log(`   Confidence: ${newConfidence}`);
+        console.log(`   Notes: ${adminNotes}`);
+        
+        onAction('approve', adminNotes, newLabel, newConfidence);
+    };
+
+    const handleReject = () => {
+        if (!adminNotes.trim()) {
+            alert('Admin notes are required');
+            return;
+        }
+        
+        console.log(`📋 Reject action triggered with notes: ${adminNotes}`);
+        onAction('reject', adminNotes);
+    };
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -328,10 +388,10 @@ const DisputeModal = ({ dispute, onClose, onAction, loading }) => {
 
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">
-                                User Feedback
+                                Reason {/* ✅ UBAH: User Feedback → Reason */}
                             </label>
                             <p className="text-gray-900 bg-yellow-50 p-3 rounded border border-yellow-200">
-                                {dispute.user_feedback}
+                                {dispute.reason} {/* ✅ UBAH: user_feedback → reason */}
                             </p>
                         </div>
 
@@ -357,64 +417,97 @@ const DisputeModal = ({ dispute, onClose, onAction, loading }) => {
                                 {/* New Label Override Option */}
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                                        New Label (When Approving)
+                                        Action on Approval
                                     </label>
                                     <select
                                         value={newLabel}
                                         onChange={(e) => setNewLabel(e.target.value)}
                                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                     >
-                                        <option value="auto">Auto (Analyze from feedback)</option>
-                                        <option value="TRUE">TRUE</option>
-                                        <option value="FALSE">FALSE</option>
-                                        <option value="MIXTURE">MIXTURE</option>
+                                        <option value="auto">🔄 Re-Verify with AI (Recommended)</option>
+                                        <option value="TRUE">✓ Set as VALID (Klaim Benar)</option>
+                                        <option value="FALSE">✗ Set as HOAX (Klaim Salah)</option>
+                                        <option value="MIXTURE">⚠️ Set as UNCERTAIN (Sebagian Benar)</option>
                                     </select>
-                                    <p className="text-xs text-gray-500 mt-1">
+                                    <p className="text-xs text-gray-500 mt-2">
                                         {newLabel === 'auto' 
-                                            ? 'System will analyze user feedback to determine new label' 
-                                            : `Will update claim label to: ${newLabel}`}
+                                            ? '✨ Sistem akan menggunakan AI untuk re-verify claim berdasarkan feedback user' 
+                                            : `📌 Akan manual-set label menjadi: ${labelMap[newLabel]?.toUpperCase()}`}
                                     </p>
                                 </div>
 
+                                {/* Confidence Adjustment (untuk manual update) */}
+                                {newLabel !== 'auto' && (
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                                            Confidence Score
+                                        </label>
+                                        <div className="flex items-center gap-3">
+                                            <input
+                                                type="range"
+                                                min="0"
+                                                max="100"
+                                                value={newConfidence * 100}
+                                                onChange={(e) => setNewConfidence(e.target.value / 100)}
+                                                className="flex-1"
+                                            />
+                                            <span className="text-lg font-semibold text-blue-600 w-16 text-right">
+                                                {(newConfidence * 100).toFixed(0)}%
+                                            </span>
+                                        </div>
+                                    </div>
+                                )}
+
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                                        Admin Notes (Optional)
+                                        Review Notes (Required) {/* ✅ UBAH: Admin Notes → Review Notes */}
                                     </label>
                                     <textarea
                                         value={adminNotes}
                                         onChange={(e) => setAdminNotes(e.target.value)}
                                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                         rows="3"
-                                        placeholder="Add notes about your decision..."
+                                        placeholder="Jelaskan alasan keputusan Anda..."
                                     />
                                 </div>
 
                                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                                     <p className="text-sm font-medium text-blue-900 mb-2">
-                                        ℹ️ What happens when you approve:
+                                        ℹ️ Yang akan terjadi saat di-approve:
                                     </p>
                                     <ul className="text-sm text-blue-800 space-y-1 ml-4 list-disc">
-                                        <li>Dispute status will be marked as "Approved"</li>
-                                        <li>Claim verification label will be updated to: <strong>{newLabel === 'auto' ? 'Auto-determined' : newLabel}</strong></li>
-                                        <li>Confidence will be set to 95% (admin verified)</li>
-                                        <li>Original values are backed up in dispute record</li>
+                                        <li>Status dispute berubah menjadi "Approved"</li>
+                                        <li>
+                                            {newLabel === 'auto' 
+                                                ? 'AI akan re-verify claim dan update label secara otomatis' 
+                                                : `Label klaim akan diubah menjadi: ${labelMap[newLabel]?.toUpperCase()}`}
+                                        </li>
+                                        <li>Email notifikasi dikirim ke user</li>
+                                        <li>Hasil original dibackup di record dispute</li>
                                     </ul>
                                 </div>
 
                                 <div className="flex gap-3">
                                     <button
-                                        onClick={() => onAction('approve', adminNotes, newLabel === 'auto' ? null : newLabel)}
-                                        disabled={loading}
-                                        className="flex-1 px-4 py-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition disabled:bg-gray-400"
+                                        onClick={handleApprove}
+                                        disabled={loading || !adminNotes.trim()}
+                                        className="flex-1 px-4 py-3 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-semibold rounded-lg transition"
                                     >
-                                        {loading ? 'Processing...' : '✓ Approve & Update Verification'}
+                                        {loading ? '⏳ Processing...' : '✓ Approve & Update'}
                                     </button>
                                     <button
-                                        onClick={() => onAction('reject', adminNotes)}
-                                        disabled={loading}
-                                        className="flex-1 px-4 py-3 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg transition disabled:bg-gray-400"
+                                        onClick={handleReject}
+                                        disabled={loading || !adminNotes.trim()}
+                                        className="flex-1 px-4 py-3 bg-red-600 hover:bg-red-700 disabled:bg-gray-400 text-white font-semibold rounded-lg transition"
                                     >
-                                        {loading ? 'Processing...' : '✗ Reject Dispute'}
+                                        {loading ? '⏳ Processing...' : '✗ Reject'}
+                                    </button>
+                                    <button
+                                        onClick={onClose}
+                                        disabled={loading}
+                                        className="px-4 py-3 bg-gray-300 hover:bg-gray-400 text-gray-900 font-semibold rounded-lg transition"
+                                    >
+                                        Close
                                     </button>
                                 </div>
                             </>
@@ -423,16 +516,16 @@ const DisputeModal = ({ dispute, onClose, onAction, loading }) => {
                         {dispute.status !== 'pending' && (
                             <div className="bg-gray-50 p-4 rounded border">
                                 <p className="text-sm font-medium text-gray-700">
-                                    Status: <span className="text-gray-900 uppercase">{dispute.status}</span>
+                                    Status: <span className="text-gray-900 font-bold uppercase">{dispute.status}</span>
                                 </p>
-                                {dispute.admin_notes && (
+                                {dispute.review_note && (
                                     <p className="text-sm text-gray-600 mt-2">
-                                        <strong>Admin Notes:</strong> {dispute.admin_notes}
+                                        <strong>Notes:</strong> {dispute.review_note} {/* ✅ UBAH: admin_notes → review_note */}
                                     </p>
                                 )}
-                                {dispute.resolved_at && (
+                                {dispute.reviewed_at && (
                                     <p className="text-sm text-gray-500 mt-2">
-                                        Resolved: {new Date(dispute.resolved_at).toLocaleString()}
+                                        Direviu: {new Date(dispute.reviewed_at).toLocaleString('id-ID')}
                                     </p>
                                 )}
                             </div>

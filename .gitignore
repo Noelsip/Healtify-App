@@ -70,3 +70,5 @@ cache/
 training/docker-compose.yml
 
 training/data/
+
+backend/api/migrations/

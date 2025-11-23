@@ -1,4 +1,6 @@
 from django.db import models
+from .text_normalization import normalize_claim_text, generate_semantic_hash
+
 
 # menyimpan sumber referensi seperti doi, url
 class Source(models.Model):
@@ -34,9 +36,14 @@ class Source(models.Model):
 # menyimpan klaim yang dikirim untuk diverifikasi
 class Claim(models.Model):
     text = models.TextField()
-    
-    # normalisasi teks klaim dari user
-    normalized_text = models.TextField(blank=True, null=True)
+    text_normalized = models.TextField(blank=True, null=True)
+    text_hash = models.CharField(max_length=64, unique=True, db_index=True)
+
+    def save(self, *args, **kwargs):
+        # Auto-generate normalized text & hash saat save
+        self.text_normalized = normalize_claim_text(self.text)
+        self.text_hash = generate_semantic_hash(self.text)
+        super().save(*args, **kwargs)
 
     # status proses verifikasi klaim
     STATUS_PENDING = 'pending'
@@ -74,6 +81,12 @@ class Claim(models.Model):
         
     def __str__(self):
         return f'Claim #{self.pk} - {self.text[:50]}...'
+    
+    class Meta:
+        indexes = [
+            models.Index(fields=['text_hash']),
+            models.Index(fields=['text_normalized']),
+        ]
     
 # Model hubungan antara claim dan sumber
 class ClaimSource(models.Model):

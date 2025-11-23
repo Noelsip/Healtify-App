@@ -103,7 +103,7 @@ Claim Text:
 "{dispute.claim_text[:200]}{'...' if len(dispute.claim_text) > 200 else ''}"
 
 User Feedback:
-{dispute.user_feedback}
+{dispute.reason}
 
 Supporting Evidence:
 - DOI: {dispute.supporting_doi or 'None'}
@@ -177,7 +177,7 @@ Healthify System
                     <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 15px 0;">
                         <h4 style="margin: 0 0 10px 0; color: #92400e;">User Feedback</h4>
                         <p style="margin: 0;">
-                            {dispute.user_feedback}
+                            {dispute.reason}
                         </p>
                     </div>
                     
@@ -262,129 +262,112 @@ Healthify System
     # ==============================
     
     def notify_user_dispute_approved(self, dispute: Dispute, admin_notes: str = "") -> bool:
-        """
-        Kirim email ke user ketika dispute mereka di-approve.
-        
-        Args:
-            dispute: Dispute object yang di-approve
-            admin_notes: Catatan dari admin
-            
-        Returns:
-            bool: Success status
-        """
+        """Kirim email ke user ketika dispute di-approve."""
         if not dispute.reporter_email:
-            logger.info(f"[EMAIL] No email for dispute #{dispute.id}, skipping user notification")
+            logger.warning(f"[EMAIL] No reporter email for dispute {dispute.id}")
             return False
         
-        subject = f"✅ Your Dispute #{dispute.id} Has Been Approved"
+        subject = f"✅ Laporan Anda Diterima - Dispute #{dispute.id}"
         
-        # Build verification change info
-        verification_change = ""
+        # Get claim verification if available
+        claim_info = ""
         if dispute.claim and hasattr(dispute.claim, 'verification_result'):
             vr = dispute.claim.verification_result
-            verification_change = f"""
-The verification result has been updated:
-- New Label: {vr.label.upper()}
-- New Confidence: {vr.confidence * 100:.1f}%
-- Previous Label: {dispute.original_label or 'N/A'}
-- Previous Confidence: {f"{dispute.original_confidence * 100:.1f}%" if dispute.original_confidence else 'N/A'}
+            claim_info = f"""
+            
+    Hasil Verifikasi Terbaru:
+    - Label: {vr.get_label_display()}
+    - Confidence: {vr.confidence_percent()}%
+    - Summary: {vr.summary[:300]}...
             """
         
-        admin_notes_section = f"\n\nAdmin Notes:\n{admin_notes}" if admin_notes else ""
-        
         message = f"""
-Dear {dispute.reporter_name or 'User'},
+    Halo {dispute.reporter_name or 'User'},
 
-Good news! Your dispute regarding the claim verification has been approved by our admin team.
+    Terima kasih telah melaporkan klaim yang menurutmu tidak akurat. Tim Healthify telah meninjau laporan Anda dan keputusan telah dibuat.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-DISPUTE DETAILS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    STATUS: ✅ DITERIMA
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Dispute ID: #{dispute.id}
-Status: APPROVED ✅
-Reviewed: {dispute.reviewed_at.strftime('%Y-%m-%d %H:%M:%S') if dispute.reviewed_at else 'Just now'}
+    Dispute ID: #{dispute.id}
+    Klaim: "{dispute.claim_text[:200]}{'...' if len(dispute.claim_text) > 200 else ''}"
+    Tanggal Review: {dispute.reviewed_at.strftime('%d %B %Y %H:%M') if dispute.reviewed_at else 'Hari ini'}
+    {claim_info}
 
-Your Claim:
-"{dispute.claim_text[:200]}{'...' if len(dispute.claim_text) > 200 else ''}"
+    Catatan Admin:
+    {admin_notes or 'Laporan Anda telah dipertimbangkan dalam proses verifikasi.'}
 
-Your Feedback:
-{dispute.user_feedback}
-{verification_change}
-{admin_notes_section}
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Kontribusi Anda membantu kami meningkatkan akurasi Healthify.
+    Terima kasih telah menjadi bagian dari komunitas kami! 🙏
 
-Thank you for helping us improve the accuracy of Healthify!
-
-Your contribution makes our platform more reliable for everyone.
-
-Best regards,
-Healthify Team
+    Best regards,
+    Tim Healthify
         """
         
-        # HTML version
         html_message = f"""
         <html>
         <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
             <div style="max-width: 600px; margin: 0 auto; padding: 20px; background: #f9f9f9;">
                 <div style="background: #10b981; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
-                    <h2 style="margin: 0;">✅ Dispute Approved!</h2>
-                    <p style="margin: 5px 0 0 0;">Your feedback has been reviewed</p>
+                    <h2 style="margin: 0;">✅ Laporan Anda Diterima!</h2>
                 </div>
                 
                 <div style="background: white; padding: 20px; border-radius: 0 0 8px 8px;">
-                    <p>Dear {dispute.reporter_name or 'User'},</p>
+                    <p>Halo {dispute.reporter_name or 'User'},</p>
                     
-                    <p>Good news! Your dispute regarding the claim verification has been <strong>approved</strong> by our admin team.</p>
+                    <p>Terima kasih telah melaporkan klaim yang menurutmu tidak akurat. 
+                    Tim Healthify telah meninjau laporan Anda.</p>
                     
                     <div style="background: #d1fae5; border-left: 4px solid #10b981; padding: 15px; margin: 20px 0;">
-                        <h4 style="margin: 0 0 10px 0; color: #065f46;">Status: APPROVED ✅</h4>
-                        <p style="margin: 0; font-size: 14px; color: #047857;">
+                        <h3 style="margin: 0 0 10px 0; color: #065f46;">Status: Diterima ✅</h3>
+                        <p style="margin: 0; font-size: 14px;">
                             Dispute ID: #{dispute.id}<br>
-                            Reviewed: {dispute.reviewed_at.strftime('%Y-%m-%d %H:%M') if dispute.reviewed_at else 'Just now'}
+                            Tanggal Review: {dispute.reviewed_at.strftime('%d %B %Y') if dispute.reviewed_at else 'Hari ini'}
                         </p>
                     </div>
                     
-                    <h3 style="color: #1f2937; border-bottom: 2px solid #e5e7eb; padding-bottom: 10px;">
-                        Your Claim
-                    </h3>
-                    <p style="background: #f3f4f6; padding: 15px; border-radius: 6px; font-style: italic;">
-                        "{dispute.claim_text[:200]}{'...' if len(dispute.claim_text) > 200 else ''}"
-                    </p>
+                    <div style="background: #f3f4f6; padding: 15px; border-radius: 6px; margin: 20px 0;">
+                        <h4 style="margin: 0 0 10px 0; color: #1f2937;">Klaim yang Dilaporkan:</h4>
+                        <p style="margin: 0; font-style: italic;">
+                            "{dispute.claim_text[:200]}{'...' if len(dispute.claim_text) > 200 else ''}"
+                        </p>
+                    </div>
                     
                     {f'''
-                    <h3 style="color: #1f2937; border-bottom: 2px solid #e5e7eb; padding-bottom: 10px; margin-top: 20px;">
-                        Verification Updated
-                    </h3>
-                    <table style="width: 100%; background: #eff6ff; padding: 15px; border-radius: 6px;">
-                        <tr>
-                            <td style="padding: 5px; font-weight: bold;">New Label:</td>
-                            <td style="padding: 5px;">{dispute.claim.verification_result.label.upper()}</td>
-                        </tr>
-                        <tr>
-                            <td style="padding: 5px; font-weight: bold;">New Confidence:</td>
-                            <td style="padding: 5px;">{dispute.claim.verification_result.confidence * 100:.1f}%</td>
-                        </tr>
-                    </table>
+                    <div style="background: #eff6ff; border-left: 4px solid #3b82f6; padding: 15px; margin: 20px 0;">
+                        <h4 style="margin: 0 0 10px 0; color: #1e40af;">Hasil Verifikasi Terbaru:</h4>
+                        <table style="width: 100%; font-size: 14px;">
+                            <tr>
+                                <td style="padding: 5px; color: #6b7280;">Label:</td>
+                                <td style="padding: 5px; font-weight: bold;">{dispute.claim.verification_result.get_label_display() if hasattr(dispute.claim, 'verification_result') else 'N/A'}</td>
+                            </tr>
+                            <tr style="background: #f9fafb;">
+                                <td style="padding: 5px; color: #6b7280;">Confidence:</td>
+                                <td style="padding: 5px; font-weight: bold;">{dispute.claim.verification_result.confidence_percent() if hasattr(dispute.claim, 'verification_result') else 'N/A'}%</td>
+                            </tr>
+                        </table>
+                    </div>
                     ''' if dispute.claim and hasattr(dispute.claim, 'verification_result') else ''}
                     
                     {f'''
                     <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0;">
-                        <h4 style="margin: 0 0 10px 0; color: #92400e;">Admin Notes</h4>
-                        <p style="margin: 0;">{admin_notes}</p>
+                        <h4 style="margin: 0 0 10px 0; color: #92400e;">Catatan Admin:</h4>
+                        <p style="margin: 0; font-size: 14px;">{admin_notes or 'Laporan Anda telah dipertimbangkan dalam proses verifikasi.'}</p>
                     </div>
                     ''' if admin_notes else ''}
                     
                     <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
                     
-                    <p style="color: #059669; font-weight: bold;">
-                        Thank you for helping us improve the accuracy of Healthify! 🙏
+                    <p style="color: #10b981; font-weight: bold;">
+                        Kontribusi Anda membantu kami meningkatkan akurasi Healthify! 🙏
                     </p>
                     
-                    <p style="color: #6b7280; font-size: 12px; text-align: center; margin: 20px 0 0 0;">
-                        This is an automated notification from Healthify System.<br>
-                        Please do not reply to this email.
+                    <p style="color: #6b7280; font-size: 12px; text-align: center; margin-top: 20px;">
+                        Terima kasih telah menjadi bagian dari komunitas kami.<br>
+                        Tim Healthify
                     </p>
                 </div>
             </div>
@@ -398,123 +381,105 @@ Healthify Team
             recipient_list=[dispute.reporter_email],
             html_message=html_message
         )
-    
+
     def notify_user_dispute_rejected(self, dispute: Dispute, admin_notes: str = "") -> bool:
-        """
-        Kirim email ke user ketika dispute mereka di-reject.
-        
-        Args:
-            dispute: Dispute object yang di-reject
-            admin_notes: Alasan rejection dari admin
-            
-        Returns:
-            bool: Success status
-        """
+        """Kirim email ke user ketika dispute di-reject."""
         if not dispute.reporter_email:
-            logger.info(f"[EMAIL] No email for dispute #{dispute.id}, skipping user notification")
+            logger.warning(f"[EMAIL] No reporter email for dispute {dispute.id}")
             return False
         
-        subject = f"❌ Your Dispute #{dispute.id} Update"
+        subject = f"📋 Update Laporan Anda - Dispute #{dispute.id}"
         
-        admin_notes_section = f"\n\nReason:\n{admin_notes}" if admin_notes else "\n\nNo specific reason provided."
+        reason = admin_notes or "Setelah tinjauan mendalam, tim kami memutuskan untuk mempertahankan verification result original."
         
         message = f"""
-            Dear {dispute.reporter_name or 'User'},
+    Halo {dispute.reporter_name or 'User'},
 
-            Thank you for your feedback. After careful review, our admin team has decided to maintain the original verification result for this claim.
+    Terima kasih atas laporan Anda mengenai verifikasi klaim. Kami telah meninjau laporan dengan cermat.
 
-            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            DISPUTE DETAILS
-            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    STATUS: TIDAK DITERIMA
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-            Dispute ID: #{dispute.id}
-            Status: NOT APPROVED ❌
-            Reviewed: {dispute.reviewed_at.strftime('%Y-%m-%d %H:%M:%S') if dispute.reviewed_at else 'Just now'}
+    Dispute ID: #{dispute.id}
+    Klaim: "{dispute.claim_text[:200]}{'...' if len(dispute.claim_text) > 200 else ''}"
+    Tanggal Review: {dispute.reviewed_at.strftime('%d %B %Y %H:%M') if dispute.reviewed_at else 'Hari ini'}
 
-            Your Claim:
-            "{dispute.claim_text[:200]}{'...' if len(dispute.claim_text) > 200 else ''}"
+    Alasan:
+    {reason}
 
-            Your Feedback:
-            {dispute.user_feedback}
-            {admin_notes_section}
+    Original Verification Result (Tetap Berlaku):
+    - Label: {dispute.original_label}
+    - Confidence: {f"{dispute.original_confidence * 100:.1f}%" if dispute.original_confidence else 'N/A'}
 
-            Original Verification Result (Maintained):
-            - Label: {dispute.original_label or 'N/A'}
-            - Confidence: {f"{dispute.original_confidence * 100:.1f}%" if dispute.original_confidence else 'N/A'}
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Jika Anda memiliki bukti tambahan yang kuat, silakan ajukan laporan baru dengan evidence yang lebih terperinci.
 
-            We appreciate your concern and value your input. If you have additional evidence or would like to submit another dispute, please feel free to do so.
+    Terima kasih atas partisipasi Anda!
 
-            Best regards,
-            Healthify Team
-                    """
+    Best regards,
+    Tim Healthify
+        """
         
-        # HTML version
         html_message = f"""
-            <html>
-            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-                <div style="max-width: 600px; margin: 0 auto; padding: 20px; background: #f9f9f9;">
-                    <div style="background: #ef4444; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
-                        <h2 style="margin: 0;">Dispute Update</h2>
-                        <p style="margin: 5px 0 0 0;">Dispute #{dispute.id}</p>
+        <html>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px; background: #f9f9f9;">
+                <div style="background: #6b7280; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
+                    <h2 style="margin: 0;">📋 Update Laporan Anda</h2>
+                </div>
+                
+                <div style="background: white; padding: 20px; border-radius: 0 0 8px 8px;">
+                    <p>Halo {dispute.reporter_name or 'User'},</p>
+                    
+                    <p>Terima kasih atas laporan Anda mengenai verifikasi klaim. 
+                    Kami telah meninjau laporan dengan cermat.</p>
+                    
+                    <div style="background: #f3f4f6; border-left: 4px solid #6b7280; padding: 15px; margin: 20px 0;">
+                        <h3 style="margin: 0 0 10px 0; color: #374151;">Status: Tidak Diterima</h3>
+                        <p style="margin: 0; font-size: 14px;">
+                            Dispute ID: #{dispute.id}<br>
+                            Tanggal Review: {dispute.reviewed_at.strftime('%d %B %Y') if dispute.reviewed_at else 'Hari ini'}
+                        </p>
                     </div>
                     
-                    <div style="background: white; padding: 20px; border-radius: 0 0 8px 8px;">
-                        <p>Dear {dispute.reporter_name or 'User'},</p>
-                        
-                        <p>Thank you for your feedback. After careful review, our admin team has decided to <strong>maintain the original verification result</strong> for this claim.</p>
-                        
-                        <div style="background: #fee2e2; border-left: 4px solid #ef4444; padding: 15px; margin: 20px 0;">
-                            <h4 style="margin: 0 0 10px 0; color: #991b1b;">Status: Not Approved ❌</h4>
-                            <p style="margin: 0; font-size: 14px; color: #b91c1c;">
-                                Dispute ID: #{dispute.id}<br>
-                                Reviewed: {dispute.reviewed_at.strftime('%Y-%m-%d %H:%M') if dispute.reviewed_at else 'Just now'}
-                            </p>
-                        </div>
-                        
-                        <h3 style="color: #1f2937; border-bottom: 2px solid #e5e7eb; padding-bottom: 10px;">
-                            Your Claim
-                        </h3>
-                        <p style="background: #f3f4f6; padding: 15px; border-radius: 6px; font-style: italic;">
-                            "{dispute.claim_text[:200]}{'...' if len(dispute.claim_text) > 200 else ''}"
-                        </p>
-                        
-                        {f'''
-                        <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0;">
-                            <h4 style="margin: 0 0 10px 0; color: #92400e;">Reason for Decision</h4>
-                            <p style="margin: 0;">{admin_notes}</p>
-                        </div>
-                        ''' if admin_notes else ''}
-                        
-                        <h3 style="color: #1f2937; border-bottom: 2px solid #e5e7eb; padding-bottom: 10px; margin-top: 20px;">
-                            Original Verification (Maintained)
-                        </h3>
-                        <table style="width: 100%; background: #f3f4f6; padding: 15px; border-radius: 6px;">
-                            <tr>
-                                <td style="padding: 5px; font-weight: bold;">Label:</td>
-                                <td style="padding: 5px;">{dispute.original_label or 'N/A'}</td>
-                            </tr>
-                            <tr>
-                                <td style="padding: 5px; font-weight: bold;">Confidence:</td>
-                                <td style="padding: 5px;">{f"{dispute.original_confidence * 100:.1f}%" if dispute.original_confidence else 'N/A'}</td>
-                            </tr>
-                        </table>
-                        
-                        <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
-                        
-                        <p style="color: #6b7280;">
-                            We appreciate your concern and value your input. If you have additional evidence or would like to submit another dispute, please feel free to do so.
-                        </p>
-                        
-                        <p style="color: #6b7280; font-size: 12px; text-align: center; margin: 20px 0 0 0;">
-                            This is an automated notification from Healthify System.<br>
-                            Please do not reply to this email.
+                    <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0;">
+                        <h4 style="margin: 0 0 10px 0; color: #92400e;">Alasan:</h4>
+                        <p style="margin: 0; font-size: 14px;">
+                            {reason}
                         </p>
                     </div>
+                    
+                    <div style="background: #f0f9ff; border-left: 4px solid #0284c7; padding: 15px; margin: 20px 0;">
+                        <h4 style="margin: 0 0 10px 0; color: #0c4a6e;">Verification Result Original (Tetap Berlaku):</h4>
+                        <table style="width: 100%; font-size: 14px;">
+                            <tr>
+                                <td style="padding: 5px; color: #6b7280;">Label:</td>
+                                <td style="padding: 5px; font-weight: bold;">{dispute.original_label.upper()}</td>
+                            </tr>
+                            <tr style="background: #f9fafb;">
+                                <td style="padding: 5px; color: #6b7280;">Confidence:</td>
+                                <td style="padding: 5px; font-weight: bold;">{f"{dispute.original_confidence * 100:.1f}%" if dispute.original_confidence else 'N/A'}</td>
+                            </tr>
+                        </table>
+                    </div>
+                    
+                    <p style="color: #6b7280; font-size: 14px; font-style: italic;">
+                        💡 Jika Anda memiliki bukti tambahan yang kuat, silakan ajukan laporan baru 
+                        dengan evidence yang lebih terperinci.
+                    </p>
+                    
+                    <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
+                    
+                    <p style="color: #6b7280; font-size: 12px; text-align: center;">
+                        Terima kasih atas partisipasi Anda dalam komunitas Healthify.<br>
+                        Tim Healthify
+                    </p>
                 </div>
-            </body>
-            </html>
+            </div>
+        </body>
+        </html>
         """
         
         return self._send_email(

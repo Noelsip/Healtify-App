@@ -92,7 +92,7 @@ class ClaimDetailSerializer(serializers.ModelSerializer):
         fields = [
             'id',
             'text',
-            'normalized_text',
+            'text_normalized',
             'status',
             'created_at',
             'updated_at',
@@ -282,101 +282,92 @@ class DisputeListSerializer(serializers.ModelSerializer):
     
 class DisputeReviewSerializer(serializers.Serializer):
     """
-        Serializer untuk admin melakukan review pada dispute
-        Mendukung approve/reject dengan opsi re-verify otomatis atau manual update.
+    Serializer untuk admin melakukan review pada dispute.
+    Mendukung approve/reject dengan opsi re-verify atau manual update.
     """
-
-    # Action utama
+    
     action = serializers.ChoiceField(
         choices=['approve', 'reject'],
-        help_text="Action: approve (terima) atau reject (tolak) "
+        help_text="Action: approve (terima) atau reject (tolak)"
     )
-
+    
     review_note = serializers.CharField(
         required=False,
         allow_blank=True,
         max_length=2000,
         help_text="Catatan review dari admin"
     )
-
+    
     # Opsi untuk re-verify otomatis
     re_verify = serializers.BooleanField(
         default=True,
         help_text="Lakukan re-verify otomatis menggunakan AI (hanya untuk approve)"
     )
-
-    # Opsi untuk manual update verification result
+    
+    # Opsi untuk manual update
     manual_update = serializers.BooleanField(
         default=False,
         help_text="Update verification result secara manual tanpa AI"
     )
-
+    
+    # Manual update fields
     new_label = serializers.ChoiceField(
-        choices = [
-            ('true', 'True/Valid'),
-            ('false', 'False/Hoax'),
-            ('misleading', 'Misleading'),
-            ('unsupported', 'Unsupported'),
-            ('inconclusive', 'Inconclusive')
-        ],
+        choices=['valid', 'hoax', 'uncertain', 'unverified'],
         required=False,
         allow_null=True,
         allow_blank=True,
         help_text="Label baru untuk klaim (jika manual_update=True)"
     )
-
+    
     new_confidence = serializers.FloatField(
         required=False,
         allow_null=True,
         min_value=0.0,
         max_value=1.0,
-        help_text="Confidence score baru (0.0 - 1.0, jika manual_update=True)"
+        help_text="Confidence score baru 0.0-1.0 (jika manual_update=True)"
     )
+    
     new_summary = serializers.CharField(
         required=False,
         allow_blank=True,
         max_length=5000,
-        help_text="Summary baru untuk verification result (jika manual_update=True)"
+        help_text="Summary baru (jika manual_update=True)"
     )
-
+    
     def validate(self, data):
-        """
-            Validasi bahwaa jika manual_update = True,
-            maka new_label, new_confidence, dan new_summary harus diisi.
-        """
+        """Validasi rules untuk approve vs reject."""
         action = data.get('action')
         manual_update = data.get('manual_update', False)
         re_verify = data.get('re_verify', True)
-
-        # Validasi hanya untuk action approve
+        
+        # ===== UNTUK ACTION APPROVE =====
         if action == 'approve':
             if manual_update:
-                # Jika manual update, validasi field-field baru
+                # Jika manual update, validasi required fields
                 if not data.get('new_label'):
                     raise serializers.ValidationError({
-                        "new_label": "Label baru harus diisi jika manual_update=True."
+                        'new_label': 'Label baru wajib diisi jika manual_update=True'
                     })
                 if data.get('new_confidence') is None:
                     raise serializers.ValidationError({
-                        "new_confidence": "Confidence baru harus diisi jika manual_update=True."
+                        'new_confidence': 'Confidence score wajib diisi jika manual_update=True'
                     })
-                if not data.get('new_summary'):
-                    raise serializers.ValidationError({
-                        "new_summary": "Summary baru harus diisi jika manual_update=True."
-                    })
+                # Summary optional untuk manual update
                 
-                # Jika manual update, matikan re_verify
+                # Jika manual update, disable re_verify
                 data['re_verify'] = False
             
-            elif not re_verify and not manual_update:
-                # Jika approve tapi tidak ada re_verify atau manual_update
+            elif not re_verify:
+                # Jika approve tapi tidak ada re_verify dan tidak manual
                 raise serializers.ValidationError({
-                    "re_verify": "Untuk approve, harus pilih re_verify=True atau manual_update=True"
+                    'non_field_errors': 'Untuk approve, pilih re_verify=True atau manual_update=True'
                 })
-
-        # Untuk reject, re_verify dan manual_update tidak digunakan
+        
+        # ===== UNTUK ACTION REJECT =====
         if action == 'reject':
+            # Untuk reject, abaikan manual_update dan re_verify
             data['re_verify'] = False
             data['manual_update'] = False
-
-        return data    
+        
+        return data
+    

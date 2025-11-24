@@ -8,6 +8,7 @@ from .views import (
     DisputeCreateView,
     DisputeDetailView,
     DisputeListView,
+    translate_verification_result,
 )
 
 from .auth_views import (
@@ -34,6 +35,7 @@ urlpatterns = [
     # Public Endpoints - Claim
     # ===========================
     path('verify/', ClaimVerifyView.as_view(), name='claim-verify'),
+    path('translate/', translate_verification_result, name='translate-verification-result'),
     path('claims/', ClaimListView.as_view(), name='claim-list'),
     path('claims/<int:claim_id>/', ClaimDetailView.as_view(), name='claim-detail'),
     path('claims/check-duplicate/', views.check_claim_duplicate, name='check-duplicate'),

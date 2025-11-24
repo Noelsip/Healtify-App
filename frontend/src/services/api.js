@@ -59,6 +59,29 @@ export const getClaimDetail = async (claimId) => {
     }
 };
 
+/**
+ * Translate verification result (label + summary)
+ * POST /api/translate/
+ * @param {{ label: string, summary: string, target_language: 'en' | 'id' }} payload
+ * @returns {Promise}
+ */
+export const translateVerificationResult = async (payload) => {
+    try {
+        const response = await fetch(`${API_BASE_URL}/translate/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+        });
+
+        return await handleResponse(response);
+    } catch (error) {
+        console.error('Error translating verification result:', error);
+        throw error;
+    }
+};
+
 /** 
  * GET ALL Claims (HISTORY)
  * GET /api/claims
@@ -131,5 +154,6 @@ export default{
     handleResponse,
     createDispute,
     getClaimDetail,
-    getAllClaims
+    getAllClaims,
+    translateVerificationResult,
 };

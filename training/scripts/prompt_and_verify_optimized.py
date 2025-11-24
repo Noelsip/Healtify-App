@@ -46,8 +46,10 @@ LLM_TIMEOUT = 15
 CACHE_TTL = 7200  # 2 jam
 
 # Quality thresholds
-MIN_NEIGHBORS_FOR_SKIP_FETCH = 3
-MIN_QUALITY_FOR_SKIP_FETCH = 0.35
+# Dibuat lebih ketat supaya fetching eksternal (CrossRef/Semantic Scholar/PubMed)
+# lebih sering dipanggil dan jurnal internasional lebih banyak dipertimbangkan.
+MIN_NEIGHBORS_FOR_SKIP_FETCH = 8
+MIN_QUALITY_FOR_SKIP_FETCH = 0.80
 MAX_NEIGHBORS_TO_PROCESS = 8
 
 # ============================================
@@ -502,17 +504,12 @@ def fetch_pubmed_fast(query: str, limit: int = 5) -> List[Dict]:
         return []
 
 def parallel_fetch_all(claim: str, limit_per_source: int = 5) -> List[Dict]:
-    """
-    🔧 IMPROVED: Fetch dengan bilingual queries untuk hasil internasional.
-    """
-    logger.info(f"[PARALLEL_FETCH] Fetching for: {claim[:60]}")
+    """Fetch dengan BILINGUAL queries."""
     
-    # Check cache
-    cache_key = f"fetch:{text_hash(claim)}"
-    cached = fetch_cache.get(cache_key)
-    if cached:
-        logger.info("[FETCH] Cache hit!")
-        return cached
+    # ✅ Translate to English
+    claim_en = translate_to_english_fast(claim)
+    logger.info(f"[FETCH] ID query: {claim[:60]}")
+    logger.info(f"[FETCH] EN query: {claim_en[:60]}")
     
     # 🆕 Translate to English for better international results
     logger.info("[FETCH] Translating to English...")
@@ -522,13 +519,12 @@ def parallel_fetch_all(claim: str, limit_per_source: int = 5) -> List[Dict]:
     all_items = []
     
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        # Use BOTH Indonesian and English queries
         futures = {
-            # Indonesian query
+            # Indonesian queries
             executor.submit(fetch_crossref_fast, claim, limit_per_source): "crossref_id",
             executor.submit(fetch_semantic_fast, claim, limit_per_source): "semantic_id",
-            executor.submit(fetch_pubmed_fast, claim, limit_per_source): "pubmed_id",
-            # 🆕 English query for international journals
+            
+            # ✅ English queries - CRITICAL untuk journal internasional
             executor.submit(fetch_crossref_fast, claim_en, limit_per_source): "crossref_en",
             executor.submit(fetch_semantic_fast, claim_en, limit_per_source): "semantic_en",
             executor.submit(fetch_pubmed_fast, claim_en, limit_per_source): "pubmed_en",

@@ -1,14 +1,17 @@
-import { Search, Share2, FileText, Loader2, AlertCircle, RefreshCw } from "lucide-react";
-import { useState, useEffect } from "react";
+import { AlertCircle, FileText, Loader2, Search, Share2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useTranslation } from 'react-i18next';
+import { translateVerificationResult, verifyClaim } from "../services/api";
+
 import { copyToClipboard, shareContent } from '../utils/shareUtils';
-import { verifyClaim } from "../services/api";
 import Toast from './Toast';
 
 const Hero = () => {
     const { t, i18n } = useTranslation();
     const [searchQuery, setSearchQuery] = useState('');
     const [translatedSummary, setTranslatedSummary] = useState(null);
+    const [translatedClaim, setTranslatedClaim] = useState(null);
+
     const [isTranslating, setIsTranslating] = useState(false);
     const [toast, setToast] = useState(null);
     const [verificationResult, setVerificationResult] = useState(null);
@@ -20,38 +23,42 @@ const Hero = () => {
      * FORCE REFRESH untuk bypass cache
      */
     useEffect(() => {
-    if (verificationResult && verificationResult.verification_result?.summary) {
-        translateSummary();
-    }}, [i18n.language, verificationResult]);
+        if (verificationResult && verificationResult.verification_result?.summary) {
+            translateSummary();
+        } else {
+            setTranslatedSummary(null);
+            setTranslatedClaim(null);
+        }
+    }, [i18n.language, verificationResult]);
 
     const showToast = (message, type = 'success') => { 
         setToast({ message, type });
     };
 
     const translateSummary = async () => {
-    if (!verificationResult?.verification_result?.summary) return;
+        if (!verificationResult || !verificationResult.verification_result?.summary) return;
 
-    const summary = verificationResult.verification_result.summary;
-    const targetLang = i18n.language;
+        const targetLang = i18n.language; // 'en' or 'id'
+        setIsTranslating(true);
 
-    if (targetLang === 'id') {
-        setTranslatedSummary(summary);
-        return;
-    }
+        try {
+            const data = await translateVerificationResult({
+                label: verificationResult.verification_result.label,
+                summary: verificationResult.verification_result.summary,
+                claim_text: verificationResult.text,
+                target_language: targetLang,
+            });
 
-    setIsTranslating(true);
-
-    try {
-        // Simple client-side translation fallback
-        // You can implement backend translation endpoint later
-        setTranslatedSummary(summary); // Temporary: show original
-    } catch (error) {
-        console.error('[TRANSLATE] Error:', error);
-        setTranslatedSummary(summary);
-    } finally {
-        setIsTranslating(false);
-    }
-};
+            setTranslatedSummary(data.translated_summary || null);
+            setTranslatedClaim(data.translated_claim_text || null);
+        } catch (error) {
+            console.error('[TRANSLATE] Error:', error);
+            setTranslatedSummary(null);
+            setTranslatedClaim(null);
+        } finally {
+            setIsTranslating(false);
+        }
+    };
 
     const handleShare = async () => {
         const result = await shareContent({
@@ -88,14 +95,15 @@ const Hero = () => {
 
         const label = formatLabel(verificationResult.verification_result?.label).text;
         const confidence = formatConfidence(verificationResult.verification_result?.confidence || 0);
-        const summary = verificationResult.verification_result?.summary || 'No summary available.';
+        const summary = translatedSummary || verificationResult.verification_result?.summary || 'No summary available.';
+        const claimText = translatedClaim || verificationResult.text;
         
         let text = `━━━━━━━━━━━━━━━━━━━━━━\n`;
         text += `🔍 HEALTHIFY - Health Claim Verification\n`;
         text += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
         
         text += `📋 ${t('hero.yourClaim')}:\n`;
-        text += `"${verificationResult.text}"\n\n`;
+        text += `"${claimText}"\n\n`;
         
         text += `🏷️ ${t('hero.analysisSummary')}: ${label}\n`;
         if (confidence) {
@@ -108,11 +116,13 @@ const Hero = () => {
         if (verificationResult.sources && verificationResult.sources.length > 0) {
             text += `📚 ${t('hero.reference')}:\n`;
             verificationResult.sources.forEach((sourceItem, index) => {
-                const source = sourceItem.source || {};
-                const title = source.title || 'No Title Available';
-                const doi = source.doi || '';
-                const url = source.url || '';
-                const relevanceScore = sourceItem.relevance_score || 0;
+                const flat = sourceItem || {};
+                const nested = sourceItem.source || {};
+
+                const title = flat.title || nested.title || 'No Title Available';
+                const doi = flat.doi || nested.doi || '';
+                const url = flat.url || nested.url || '';
+                const relevanceScore = flat.relevance_score || nested.relevance_score || 0;
                 
                 text += `${index + 1}. ${title}`;
                 if (doi) {
@@ -152,6 +162,8 @@ const Hero = () => {
         setIsLoading(true);
         setError(null);
         setVerificationResult(null);
+        setTranslatedSummary(null);
+        setTranslatedClaim(null);
         setLoadingStage(t('hero.dynamicLabels.analyzing'));
 
         try {
@@ -198,6 +210,7 @@ const Hero = () => {
     };
 
     const displaySummary = translatedSummary || verificationResult?.verification_result?.summary || t('hero.noSummary');
+    const displayClaim = translatedClaim || verificationResult?.text || '';
 
     
     return (
@@ -293,7 +306,7 @@ const Hero = () => {
                         {/* Claim Text */}
                         <div className="mb-4 mt-4 p-3 sm:p-4 bg-blue-50 rounded-lg">
                             <h3 className="font-bold text-sm sm:text-base text-slate-800 mb-2">{t('hero.yourClaim')}:</h3>
-                            <p className="text-xs sm:text-sm text-slate-700 italic break-words">"{verificationResult.text}"</p>
+                            <p className="text-xs sm:text-sm text-slate-700 italic break-words">"{displayClaim}"</p>
                         </div>
 
                         {/* Summary */}
@@ -315,11 +328,14 @@ const Hero = () => {
                                 <h4 className="font-bold text-sm sm:text-base text-slate-800 mb-2">{t('hero.reference')}</h4>
                                 <ul className="text-xs sm:text-sm text-blue-500 space-y-2">
                                     {verificationResult.sources.map((sourceItem, index) => {
-                                        const source = sourceItem.source || {};
-                                        const doi = source.doi || '';
-                                        const url = source.url || '';
-                                        const title = source.title || '';
-                                        const relevanceScore = sourceItem.relevance_score || 0;
+                                        const flat = sourceItem || {};
+                                        const nested = sourceItem.source || {};
+
+                                        const doi = flat.doi || nested.doi || '';
+                                        const url = flat.url || nested.url || '';
+                                        const title = flat.title || nested.title || '';
+                                        const relevanceScore =
+                                            flat.relevance_score || nested.relevance_score || 0;
 
                                         return (
                                             <li key={index} className="break-words">

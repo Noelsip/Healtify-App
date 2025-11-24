@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import Logo from '../assets/logo.png';
-import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import Logo from '../assets/logo.png';
 
 const Navbar = () => {
   const { t, i18n } = useTranslation();
@@ -46,6 +45,16 @@ const Navbar = () => {
           >
             {t('nav.home')}
           </Link>
+          <Link
+            to="/documentation"
+            className={`font-poppins font-medium transition-colors ${
+              isActive('/documentation') 
+              ? 'text-blue-600 font-bold'
+              : 'text-gray-700 hover:text-blue-500'
+            }`}
+          >
+            {t('nav.documentation')}
+          </Link>
           <Link 
             to="/report"
             className={`bg-blue-400 text-white px-4 py-2 rounded-3xl hover:bg-blue-600 transition-colors font-poppins font-medium ${
@@ -88,6 +97,17 @@ const Navbar = () => {
             onClick={() => setIsMenuOpen(false)}
           >
             {t('nav.home')}
+          </Link>
+          <Link
+            to="/documentation"
+            className={`block font-poppins font-medium py-2 transition-colors ${
+              isActive('/documentation')
+              ? 'text-blue-600 font-bold'
+              : 'text-gray-700 hover:text-blue-500'
+            }`}
+            onClick={() => setIsMenuOpen(false)}
+          >
+            {t('nav.documentation')}
           </Link>
           <Link 
             to="/report"

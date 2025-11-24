@@ -1,15 +1,15 @@
-import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { Route, BrowserRouter as Router, Routes } from 'react-router-dom';
 import Layout from './components/Layout';
+import './i18n/config';
+import Documentation from './pages/Documentation';
 import Home from './pages/Home';
 import Report from './pages/Report';
-import AdminLogin from './pages/admin/AdminLogin';
-import AdminDashboard from './pages/admin/AdminDashboard';
+import AdminClaimDetail from './pages/admin/AdminClaimDetail';
 import AdminClaims from './pages/admin/AdminClaims';
-import AdminClaimDetail from './pages/admin/AdminClaimDetail'
+import AdminDashboard from './pages/admin/AdminDashboard';
 import AdminDisputes from './pages/admin/AdminDisputes';
+import AdminLogin from './pages/admin/AdminLogin';
 import AdminSources from './pages/admin/AdminSources';
-import './i18n/config';
 
 function App() {
   return (
@@ -19,6 +19,7 @@ function App() {
           {/* Public Routes */}
           <Route path="/" element={<Layout />}>
             <Route index element={<Home />} />
+            <Route path="documentation" element={<Documentation />} />
             <Route path="report" element={<Report />} />
           </Route>
 

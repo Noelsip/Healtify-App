@@ -167,6 +167,106 @@ const resources = {
         en: "EN",
         toggle: "ID / EN",
         current: "Current Language: English"
+      },
+      documentation: {
+        header: {
+          label: "Documentation",
+          title: "Healthify Documentation",
+          subtitle: "Learn how Healthify works behind the scenes and how you can use it to verify health claims quickly and accurately."
+        },
+        about: {
+          title: "What is Healthify?",
+          intro: "AI assistant that helps you verify health claims in seconds, not based on opinions, but based on thousands of scientific publications.",
+          stats: {
+            speed: "Seconds, not days",
+            sources: "5+ scientific APIs",
+            tech: "AI + RAG"
+          },
+          features: {
+            title: "Why is Healthify Different?",
+            autoSearch: {
+              title: "Automatic Evidence Search",
+              desc: "The system searches and analyzes publications from PubMed, Semantic Scholar, CrossRef, Elsevier, and Google Books automatically—you don't need to do manual research."
+            },
+            ragAI: {
+              title: "AI with Scientific Context (RAG)",
+              desc: "Uses Retrieval-Augmented Generation (RAG) so the LLM doesn't just \"guess\", but answers based on concrete evidence from the vector database."
+            },
+            transparent: {
+              title: "Structured & Transparent Results",
+              desc: "Every verification comes with a label (Valid/Hoax/Uncertain), confidence score, summary, and list of references you can check yourself."
+            },
+            multilang: {
+              title: "Multilingual & Easy Access",
+              desc: "Supports Indonesian and English. Just type a claim, click the button, and get the answer—no registration or subscription required."
+            }
+          },
+          mission: {
+            title: "Our Mission",
+            desc: "Help Indonesian and global communities be more critical of circulating health information, reduce hoax spread, and improve data-based scientific literacy—not just viral on social media."
+          }
+        },
+        pipeline: {
+          title: "Architecture (Pipeline)",
+          subtitle: "The following pipeline shows how Healthify builds a knowledge base and answers claims. The main source comes from external APIs like PubMed, Google Books, Semantic Scholar, and others.",
+          phase1: {
+            title: "Phase 1: Data Acquisition",
+            label: "Data Collection",
+            step1: { title: "API Sources", desc: "Scientific data from PubMed, Google Books, Semantic Scholar, etc." },
+            step2: { title: "Ingestion", desc: "Collect & store structured data, prepare consistent format." },
+            step3: { title: "Extract & Normalize", desc: "Extract important content, normalize text (lowercase, cleaning)." }
+          },
+          phase2: {
+            title: "Phase 2: Processing & Indexing",
+            label: "Data Processing",
+            step4: { title: "Word Chunking", desc: "Split text into short chunks based on words/sentences." },
+            step5: { title: "Batch Embedding", desc: "Create vector embeddings with Gemini (batch mode)." },
+            step6: { title: "pgvector (Postgres)", desc: "Store embeddings in pgvector for similarity search." }
+          },
+          phase3: {
+            title: "Phase 3: Retrieval & Generation",
+            label: "Verification & Output",
+            step7: { title: "Retriever", desc: "Find the most relevant chunks from pgvector based on user claim." },
+            step8: { title: "LLM (RAG)", desc: "LLM analyzes claim based on evidence (RAG)." },
+            step9: { title: "Result & Frontend", desc: "Store as VerificationResult, display in UI." }
+          },
+          translation: {
+            title: "Translation Layer",
+            desc: "Verification results can be translated to Indonesian or English via the /api/translate/ endpoint, so claim and summary displays follow UI language."
+          }
+        },
+        userGuide: {
+          title: "How to Use the App",
+          subtitle: "Step-by-step guide to verify health claims using Healthify. The process is fast, easy, and requires no registration.",
+          step1: {
+            title: "Enter Claim",
+            desc: "Type the health statement you want to check in the \"Enter Claim\" field on the homepage.",
+            example: "Example: \"Drinking lemon water can cure the flu\""
+          },
+          step2: {
+            title: "Press Check Button",
+            desc: "Click the \"Verify Now\" button. The AI system will start searching for scientific evidence related to that claim.",
+            button: "Verify Now"
+          },
+          step3: {
+            title: "Wait for Verification Results",
+            desc: "Healthify will display the claim status (Valid / Hoax / Uncertain), confidence level, and list of scientific references in seconds.",
+            exampleTitle: "Example Display Result:",
+            exampleRef: "References:",
+            exampleLink: "\"Health risks of smoking\" - PubMed (2023)"
+          },
+          step4: {
+            title: "Share Information",
+            desc: "You can share verification results with others using the share or copy buttons available on the result card.",
+            shareBtn: "Share",
+            copyBtn: "Copy"
+          },
+          step5: {
+            title: "Report if There's an Error",
+            desc: "Please report if you find verification results that feel incorrect based on other scientific evidence you have, via the \"Report\" page.",
+            button: "Report"
+          }
+        }
       }
     }
   },
@@ -332,6 +432,106 @@ const resources = {
         en: "EN",
         toggle: "ID / EN",
         current: "Bahasa Saat Ini: Indonesia"
+      },
+      documentation: {
+        header: {
+          label: "Documentation",
+          title: "Dokumentasi Healthify",
+          subtitle: "Pelajari bagaimana Healthify bekerja di balik layar dan bagaimana kamu bisa memanfaatkannya untuk memverifikasi klaim kesehatan dengan cepat dan akurat."
+        },
+        about: {
+          title: "Apa itu Healthify?",
+          intro: "Asisten AI yang membantu kamu memverifikasi klaim kesehatan dalam hitungan detik, bukan berdasarkan opini, tapi berdasarkan ribuan publikasi ilmiah.",
+          stats: {
+            speed: "Detik, bukan hari",
+            sources: "5+ API ilmiah",
+            tech: "AI + RAG"
+          },
+          features: {
+            title: "Kenapa Healthify Berbeda?",
+            autoSearch: {
+              title: "Pencarian Bukti Otomatis",
+              desc: "Sistem mencari dan menganalisis publikasi dari PubMed, Semantic Scholar, CrossRef, Elsevier, dan Google Books secara otomatis—kamu tidak perlu riset manual."
+            },
+            ragAI: {
+              title: "AI dengan Konteks Ilmiah (RAG)",
+              desc: "Menggunakan Retrieval-Augmented Generation (RAG) sehingga LLM tidak hanya \"menebak\", tapi menjawab berdasarkan bukti konkret dari database vektor."
+            },
+            transparent: {
+              title: "Hasil Terstruktur & Transparan",
+              desc: "Setiap verifikasi dilengkapi dengan label (Valid/Hoax/Tidak Pasti), skor kepercayaan, ringkasan, dan daftar referensi yang bisa kamu cek sendiri."
+            },
+            multilang: {
+              title: "Multibahasa & Mudah Diakses",
+              desc: "Mendukung Bahasa Indonesia dan Inggris. Cukup ketik klaim, klik tombol, dan dapatkan jawaban—tidak perlu registrasi atau langganan."
+            }
+          },
+          mission: {
+            title: "Misi Kami",
+            desc: "Membantu masyarakat Indonesia dan dunia lebih kritis terhadap informasi kesehatan yang beredar, menurunkan penyebaran hoaks, dan meningkatkan literasi sains berbasis data—bukan sekadar viral di media sosial."
+          }
+        },
+        pipeline: {
+          title: "Arsitektur Singkat (Pipeline)",
+          subtitle: "Pipeline berikut menggambarkan bagaimana Healthify membangun basis pengetahuan dan menjawab klaim. Sumber utama berasal dari API eksternal seperti PubMed, Google Books, Semantic Scholar, dan lain-lain.",
+          phase1: {
+            title: "Fase 1: Data Acquisition",
+            label: "Pengumpulan Data",
+            step1: { title: "API Sources", desc: "Data ilmiah dari PubMed, Google Books, Semantic Scholar, dll." },
+            step2: { title: "Ingestion", desc: "Kumpulkan & simpan terstruktur, siapkan format konsisten." },
+            step3: { title: "Extract & Normalize", desc: "Ekstrak konten penting, normalisasi teks (lowercase, cleaning)." }
+          },
+          phase2: {
+            title: "Fase 2: Processing & Indexing",
+            label: "Pemrosesan Data",
+            step4: { title: "Word Chunking", desc: "Pecah teks jadi chunk pendek berbasis kata/kalimat." },
+            step5: { title: "Batch Embedding", desc: "Buat embedding vektor dengan Gemini (batch mode)." },
+            step6: { title: "pgvector (Postgres)", desc: "Simpan embedding di pgvector untuk similarity search." }
+          },
+          phase3: {
+            title: "Fase 3: Retrieval & Generation",
+            label: "Verifikasi & Output",
+            step7: { title: "Retriever", desc: "Cari chunk paling relevan dari pgvector berdasarkan klaim user." },
+            step8: { title: "LLM (RAG)", desc: "LLM analisis klaim berdasarkan bukti (RAG)." },
+            step9: { title: "Result & Frontend", desc: "Simpan sebagai VerificationResult, tampilkan di UI." }
+          },
+          translation: {
+            title: "Layer Terjemahan",
+            desc: "Hasil verifikasi dapat diterjemahkan ke bahasa Indonesia atau Inggris melalui endpoint /api/translate/, sehingga tampilan klaim dan ringkasan mengikuti bahasa UI."
+          }
+        },
+        userGuide: {
+          title: "Cara Penggunaan Aplikasi",
+          subtitle: "Panduan langkah demi langkah untuk memverifikasi klaim kesehatan menggunakan Healthify. Prosesnya cepat, mudah, dan tidak memerlukan registrasi.",
+          step1: {
+            title: "Masukkan Klaim",
+            desc: "Ketik pernyataan kesehatan yang ingin kamu periksa di kolom \"Masukkan Klaim\" di halaman utama.",
+            example: "Contoh: \"Minum air lemon bisa menyembuhkan flu\""
+          },
+          step2: {
+            title: "Tekan Tombol Periksa",
+            desc: "Klik tombol \"Verifikasi Sekarang\". Sistem AI akan mulai mencari bukti ilmiah terkait klaim tersebut.",
+            button: "Verifikasi Sekarang"
+          },
+          step3: {
+            title: "Tunggu Hasil Verifikasi",
+            desc: "Healthify akan menampilkan status klaim (Valid / Hoax / Tidak Pasti), tingkat kepercayaan, serta daftar referensi ilmiah dalam hitungan detik.",
+            exampleTitle: "Contoh Tampilan Hasil:",
+            exampleRef: "Referensi:",
+            exampleLink: "\"Health risks of smoking\" - PubMed (2023)"
+          },
+          step4: {
+            title: "Bagikan Informasi",
+            desc: "Anda bisa menyebarkan hasil verifikasi kepada orang lain melalui tombol bagikan atau salin yang tersedia di kartu hasil.",
+            shareBtn: "Bagikan",
+            copyBtn: "Salin"
+          },
+          step5: {
+            title: "Laporkan Jika Ada Kesalahan",
+            desc: "Silakan laporkan jika kamu menemukan hasil verifikasi yang terasa keliru berdasarkan bukti ilmiah lain yang kamu miliki, melalui halaman \"Laporkan\".",
+            button: "Laporkan"
+          }
+        }
       }
     }
   }

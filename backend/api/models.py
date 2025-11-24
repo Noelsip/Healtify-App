@@ -1,3 +1,5 @@
+import logging
+
 from django.db import models
 from .text_normalization import normalize_claim_text, generate_semantic_hash
 
@@ -185,8 +187,14 @@ class VerificationResult(models.Model):
             return self.LABEL_UNCERTAIN
 
     def save(self, *args, **kwargs):
-        """Auto-set label based on confidence if not manually set."""
-        if not self.pk:  # Only on creation
+        """Save without overriding label/confidence coming from AI.
+
+        If you explicitly want to auto-derive the label from confidence and
+        attached sources, call save(auto_label=True).
+        """
+        auto_label = kwargs.pop('auto_label', False)
+
+        if auto_label and not self.pk:  # Only on creation when explicitly requested
             has_sources = self.claim.sources.exists() if self.claim else False
             has_journal = False
             if has_sources:
@@ -194,13 +202,13 @@ class VerificationResult(models.Model):
                 has_journal = self.claim.sources.filter(
                     models.Q(doi__isnull=False) | models.Q(source_type='journal')
                 ).exists()
-            
+
             self.label = self.determine_label_from_confidence(has_sources, has_journal)
-            
+
             # Set confidence to NULL for unverified
             if self.label == self.LABEL_UNVERIFIED:
                 self.confidence = None
-                
+
         super().save(*args, **kwargs)
         
     def __str__(self):

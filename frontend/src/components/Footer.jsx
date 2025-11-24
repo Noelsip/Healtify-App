@@ -1,9 +1,9 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import logoHealthify from '../assets/logo.png'; 
 import githubIcon from '../assets/github.png';
 import gmailIcon from '../assets/gmail.png';
 import linkedinIcon from '../assets/linkedin.png';
+import logoHealthify from '../assets/logo.png';
 
 const Footer = () => {
     const { t } = useTranslation();
@@ -34,8 +34,8 @@ const Footer = () => {
 
     const footerLinks = [
         { name: t('footer.about'), url: '/tentang' },
-        { name: t('footer.documentation'), url: '#dokumentasi' },
-        { name: t('footer.report'), url: '#laporkan' }
+        { name: t('footer.documentation'), url: '/documentation' },
+        { name: t('footer.report'), url: '/report' }
     ];
 
     return (

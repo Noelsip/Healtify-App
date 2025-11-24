@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { AlertCircle, ArrowLeft, Filter as FilterIcon, LogOut, Scale, Search } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
@@ -182,24 +183,29 @@ const AdminDisputes = () => {
     return (
         <div className="min-h-screen bg-gray-50">
             {/* Header */}
-            <header className="bg-white shadow-sm">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+            <header className="bg-gradient-to-r from-blue-600 to-cyan-600 shadow-lg">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
                     <div className="flex justify-between items-center">
                         <div>
-                            <h1 className="text-2xl font-bold text-gray-900">Disputes Management</h1>
-                            <p className="text-sm text-gray-600">Review and resolve user disputes</p>
+                            <div className="flex items-center gap-3 mb-2">
+                                <Scale className="w-8 h-8 text-white" />
+                                <h1 className="text-2xl sm:text-3xl font-bold text-white">Disputes Management</h1>
+                            </div>
+                            <p className="text-sm text-blue-100">Review and resolve user disputes</p>
                         </div>
                         <div className="flex gap-3">
                             <button
                                 onClick={() => navigate('/admin/dashboard')}
-                                className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition"
+                                className="inline-flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg transition backdrop-blur-sm border border-white/20"
                             >
-                                ← Dashboard
+                                <ArrowLeft className="w-4 h-4" />
+                                Dashboard
                             </button>
                             <button
                                 onClick={handleLogout}
-                                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition"
+                                className="inline-flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg transition backdrop-blur-sm border border-white/20"
                             >
+                                <LogOut className="w-4 h-4" />
                                 Logout
                             </button>
                         </div>
@@ -210,99 +216,131 @@ const AdminDisputes = () => {
             {/* Main Content */}
             <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
                 {error && (
-                    <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
-                        {error}
+                    <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6 flex items-start gap-2">
+                        <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                        <span>{error}</span>
                     </div>
                 )}
 
                 {/* Filter */}
-                <div className="bg-white rounded-lg shadow p-6 mb-6">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Filter by Status
-                    </label>
-                    <select
-                        value={filterStatus}
-                        onChange={(e) => setFilterStatus(e.target.value)}
-                        className="w-full md:w-64 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    >
-                        <option value="all">All Status</option>
-                        <option value="pending">Pending</option>
-                        <option value="approved">Approved</option>
-                        <option value="rejected">Rejected</option>
-                    </select>
-
-                    <div className="mt-4 text-sm text-gray-600">
-                        Showing {disputes.length} disputes
+                <div className="bg-white rounded-2xl shadow-xl border border-slate-100 p-6 mb-6">
+                    <div className="flex items-center gap-2 mb-4">
+                        <FilterIcon className="w-5 h-5 text-blue-600" />
+                        <label className="block text-sm font-semibold text-gray-700">
+                            Filter by Status
+                        </label>
+                    </div>
+                    <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
+                        <select
+                            value={filterStatus}
+                            onChange={(e) => setFilterStatus(e.target.value)}
+                            className="w-full sm:w-64 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        >
+                            <option value="all">All Status</option>
+                            <option value="pending">Pending</option>
+                            <option value="approved">Approved</option>
+                            <option value="rejected">Rejected</option>
+                        </select>
+                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                            <Search className="w-4 h-4" />
+                            <span>Showing <span className="font-semibold text-blue-600">{disputes.length}</span> disputes</span>
+                        </div>
                     </div>
                 </div>
 
-                {/* Disputes Table */}
-                <div className="bg-white rounded-lg shadow overflow-hidden">
-                    <div className="overflow-x-auto">
-                        <table className="min-w-full divide-y divide-gray-200">
-                            <thead className="bg-gray-50">
-                                <tr>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        ID
-                                    </th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Claim Text
-                                    </th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Reason {/* ✅ UBAH: User Feedback → Reason */}
-                                    </th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Status
-                                    </th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Created
-                                    </th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Actions
-                                    </th>
-                                </tr>
-                            </thead>
-                            <tbody className="bg-white divide-y divide-gray-200">
-                                {disputes.length === 0 ? (
-                                    <tr>
-                                        <td colSpan="6" className="px-6 py-8 text-center text-gray-500">
-                                            No disputes found
-                                        </td>
-                                    </tr>
-                                ) : (
-                                    disputes.map((dispute) => (
-                                        <tr key={dispute.id} className="hover:bg-gray-50">
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                                #{dispute.id}
-                                            </td>
-                                            <td className="px-6 py-4 text-sm text-gray-900 max-w-md">
-                                                <div className="truncate">{dispute.claim_text}</div>
-                                            </td>
-                                            <td className="px-6 py-4 text-sm text-gray-900 max-w-xs">
-                                                <div className="truncate">{dispute.reason}</div> {/* ✅ UBAH: user_feedback → reason */}
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap">
-                                                <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(dispute.status)}`}>
-                                                    {dispute.status.toUpperCase()}
-                                                </span>
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                {new Date(dispute.created_at).toLocaleDateString()}
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm">
-                                                <button
-                                                    onClick={() => handleViewDetail(dispute.id)}
-                                                    className="text-blue-600 hover:text-blue-900 font-medium"
-                                                >
-                                                    Review
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
+                {/* Disputes Cards */}
+                <div className="space-y-4">
+                    {disputes.length === 0 ? (
+                        <div className="bg-white rounded-2xl shadow-xl border border-slate-100 p-12 text-center">
+                            <Scale className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                            <p className="text-gray-500 text-lg font-medium">No disputes found</p>
+                            <p className="text-gray-400 text-sm mt-2">Disputes will appear here when users report issues</p>
+                        </div>
+                    ) : (
+                        disputes.map((dispute) => {
+                            const statusConfig = {
+                                pending: { bg: 'bg-yellow-50', border: 'border-yellow-200', text: 'text-yellow-800', icon: <Clock className="w-5 h-5" /> },
+                                approved: { bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-800', icon: <CheckCircle2 className="w-5 h-5" /> },
+                                rejected: { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-800', icon: <XCircle className="w-5 h-5" /> }
+                            };
+                            const config = statusConfig[dispute.status] || statusConfig.pending;
+                            
+                            return (
+                                <div 
+                                    key={dispute.id} 
+                                    className="bg-white rounded-2xl shadow-lg border border-slate-100 p-6 hover:shadow-xl transition-shadow"
+                                >
+                                    <div className="flex flex-col lg:flex-row gap-6">
+                                        {/* Left Side - Content */}
+                                        <div className="flex-1 space-y-4">
+                                            {/* Header */}
+                                            <div className="flex items-start justify-between gap-4">
+                                                <div className="flex items-center gap-3">
+                                                    <div className={`${config.bg} ${config.border} border p-2 rounded-lg`}>
+                                                        <div className={config.text}>
+                                                            {config.icon}
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-xs font-bold text-gray-500">Dispute</span>
+                                                            <span className="text-sm font-bold text-gray-900">#{dispute.id}</span>
+                                                        </div>
+                                                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full ${config.bg} ${config.text} ${config.border} border mt-1`}>
+                                                            {dispute.status.toUpperCase()}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-2 text-xs text-gray-500">
+                                                    <Calendar className="w-4 h-4" />
+                                                    {new Date(dispute.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                                </div>
+                                            </div>
+
+                                            {/* Claim Text */}
+                                            <div>
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    <FileText className="w-4 h-4 text-blue-600" />
+                                                    <label className="text-xs font-semibold text-gray-700">Claim Text</label>
+                                                </div>
+                                                <p className="text-sm text-gray-900 bg-gray-50 p-3 rounded-lg border border-gray-200 line-clamp-2">
+                                                    {dispute.claim_text}
+                                                </p>
+                                            </div>
+
+                                            {/* Reason */}
+                                            <div>
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    <AlertCircle className="w-4 h-4 text-orange-600" />
+                                                    <label className="text-xs font-semibold text-gray-700">Dispute Reason</label>
+                                                </div>
+                                                <p className="text-sm text-gray-900 bg-orange-50 p-3 rounded-lg border border-orange-200 line-clamp-2">
+                                                    {dispute.reason}
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        {/* Right Side - Actions */}
+                                        <div className="lg:w-48 flex flex-col justify-center gap-3">
+                                            <button
+                                                onClick={() => handleViewDetail(dispute.id)}
+                                                className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white font-semibold rounded-lg transition shadow-lg hover:shadow-xl"
+                                            >
+                                                <Search className="w-4 h-4" />
+                                                Review Detail
+                                            </button>
+                                            {dispute.reporter_name && (
+                                                <div className="flex items-center gap-2 text-xs text-gray-600 justify-center">
+                                                    <User className="w-3 h-3" />
+                                                    <span>{dispute.reporter_name}</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })
+                    )}
                 </div>
             </main>
 
@@ -363,50 +401,64 @@ const DisputeModal = ({ dispute, onClose, onAction, loading }) => {
     };
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-                <div className="p-6">
-                    <div className="flex justify-between items-center mb-4">
-                        <h2 className="text-2xl font-bold text-gray-900">
-                            Dispute #{dispute.id}
-                        </h2>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto border border-slate-200">
+                <div className="p-6 sm:p-8">
+                    <div className="flex justify-between items-center mb-6">
+                        <div className="flex items-center gap-3">
+                            <div className="bg-gradient-to-br from-blue-500 to-cyan-600 p-2 rounded-lg">
+                                <Scale className="w-6 h-6 text-white" />
+                            </div>
+                            <div>
+                                <h2 className="text-2xl font-bold text-gray-900">
+                                    Dispute #{dispute.id}
+                                </h2>
+                                <p className="text-sm text-gray-500">Review and resolve this dispute</p>
+                            </div>
+                        </div>
                         <button
                             onClick={onClose}
-                            className="text-gray-500 hover:text-gray-700 text-2xl"
+                            className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100 transition"
                         >
-                            ✕
+                            <X className="w-6 h-6" />
                         </button>
                     </div>
 
-                    <div className="space-y-4">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Claim Text
-                            </label>
-                            <p className="text-gray-900 bg-gray-50 p-3 rounded border">{dispute.claim_text}</p>
+                    <div className="space-y-5">
+                        <div className="bg-gradient-to-br from-blue-50 to-white border border-blue-100 rounded-xl p-4">
+                            <div className="flex items-center gap-2 mb-2">
+                                <FileText className="w-4 h-4 text-blue-600" />
+                                <label className="block text-sm font-semibold text-gray-700">
+                                    Claim Text
+                                </label>
+                            </div>
+                            <p className="text-gray-900 text-sm leading-relaxed">{dispute.claim_text}</p>
                         </div>
 
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Reason {/* ✅ UBAH: User Feedback → Reason */}
-                            </label>
-                            <p className="text-gray-900 bg-yellow-50 p-3 rounded border border-yellow-200">
-                                {dispute.reason} {/* ✅ UBAH: user_feedback → reason */}
+                        <div className="bg-gradient-to-br from-orange-50 to-white border border-orange-100 rounded-xl p-4">
+                            <div className="flex items-center gap-2 mb-2">
+                                <AlertCircle className="w-4 h-4 text-orange-600" />
+                                <label className="block text-sm font-semibold text-gray-700">
+                                    Dispute Reason
+                                </label>
+                            </div>
+                            <p className="text-gray-900 text-sm leading-relaxed">
+                                {dispute.reason}
                             </p>
                         </div>
 
                         <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                                <label className="block text-xs font-semibold text-gray-600 mb-2">
                                     Current Label
                                 </label>
-                                <p className="text-gray-900 font-semibold">{dispute.original_label || 'N/A'}</p>
+                                <p className="text-gray-900 font-bold text-lg">{dispute.original_label || 'N/A'}</p>
                             </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                                <label className="block text-xs font-semibold text-gray-600 mb-2">
                                     Current Confidence
                                 </label>
-                                <p className="text-gray-900 font-semibold">
+                                <p className="text-gray-900 font-bold text-lg">
                                     {dispute.original_confidence ? `${(dispute.original_confidence * 100).toFixed(1)}%` : 'N/A'}
                                 </p>
                             </div>
@@ -415,25 +467,33 @@ const DisputeModal = ({ dispute, onClose, onAction, loading }) => {
                         {dispute.status === 'pending' && (
                             <>
                                 {/* New Label Override Option */}
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                                        Action on Approval
-                                    </label>
+                                <div className="bg-white border-2 border-blue-100 rounded-xl p-4">
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <Bot className="w-5 h-5 text-blue-600" />
+                                        <label className="block text-sm font-semibold text-gray-700">
+                                            Action on Approval
+                                        </label>
+                                    </div>
                                     <select
                                         value={newLabel}
                                         onChange={(e) => setNewLabel(e.target.value)}
-                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-medium"
                                     >
-                                        <option value="auto">🔄 Re-Verify with AI (Recommended)</option>
-                                        <option value="TRUE">✓ Set as VALID (Klaim Benar)</option>
-                                        <option value="FALSE">✗ Set as HOAX (Klaim Salah)</option>
+                                        <option value="auto">🤖 Re-Verify with AI (Recommended)</option>
+                                        <option value="TRUE">✅ Set as VALID (Klaim Benar)</option>
+                                        <option value="FALSE">❌ Set as HOAX (Klaim Salah)</option>
                                         <option value="MIXTURE">⚠️ Set as UNCERTAIN (Sebagian Benar)</option>
                                     </select>
-                                    <p className="text-xs text-gray-500 mt-2">
-                                        {newLabel === 'auto' 
-                                            ? '✨ Sistem akan menggunakan AI untuk re-verify claim berdasarkan feedback user' 
-                                            : `📌 Akan manual-set label menjadi: ${labelMap[newLabel]?.toUpperCase()}`}
-                                    </p>
+                                    <div className="mt-3 p-3 bg-blue-50 rounded-lg">
+                                        <p className="text-xs text-blue-800 flex items-start gap-2">
+                                            <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                                            <span>
+                                                {newLabel === 'auto' 
+                                                    ? 'Sistem akan menggunakan AI untuk re-verify claim berdasarkan feedback user' 
+                                                    : `Akan manual-set label menjadi: ${labelMap[newLabel]?.toUpperCase()}`}
+                                            </span>
+                                        </p>
+                                    </div>
                                 </div>
 
                                 {/* Confidence Adjustment (untuk manual update) */}
@@ -459,53 +519,91 @@ const DisputeModal = ({ dispute, onClose, onAction, loading }) => {
                                 )}
 
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                                        Review Notes (Required) {/* ✅ UBAH: Admin Notes → Review Notes */}
-                                    </label>
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <FileText className="w-4 h-4 text-gray-600" />
+                                        <label className="block text-sm font-semibold text-gray-700">
+                                            Review Notes (Required)
+                                        </label>
+                                    </div>
                                     <textarea
                                         value={adminNotes}
                                         onChange={(e) => setAdminNotes(e.target.value)}
-                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                        rows="3"
+                                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        rows="4"
                                         placeholder="Jelaskan alasan keputusan Anda..."
                                     />
                                 </div>
 
-                                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                                    <p className="text-sm font-medium text-blue-900 mb-2">
-                                        ℹ️ Yang akan terjadi saat di-approve:
-                                    </p>
-                                    <ul className="text-sm text-blue-800 space-y-1 ml-4 list-disc">
-                                        <li>Status dispute berubah menjadi "Approved"</li>
-                                        <li>
-                                            {newLabel === 'auto' 
-                                                ? 'AI akan re-verify claim dan update label secara otomatis' 
-                                                : `Label klaim akan diubah menjadi: ${labelMap[newLabel]?.toUpperCase()}`}
+                                <div className="bg-gradient-to-br from-blue-50 to-cyan-50 border border-blue-200 rounded-xl p-4">
+                                    <div className="flex items-start gap-2 mb-3">
+                                        <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                                        <p className="text-sm font-semibold text-blue-900">
+                                            Yang akan terjadi saat di-approve:
+                                        </p>
+                                    </div>
+                                    <ul className="text-sm text-blue-800 space-y-2 ml-7">
+                                        <li className="flex items-start gap-2">
+                                            <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                                            <span>Status dispute berubah menjadi "Approved"</span>
                                         </li>
-                                        <li>Email notifikasi dikirim ke user</li>
-                                        <li>Hasil original dibackup di record dispute</li>
+                                        <li className="flex items-start gap-2">
+                                            <Bot className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                                            <span>
+                                                {newLabel === 'auto' 
+                                                    ? 'AI akan re-verify claim dan update label secara otomatis' 
+                                                    : `Label klaim akan diubah menjadi: ${labelMap[newLabel]?.toUpperCase()}`}
+                                            </span>
+                                        </li>
+                                        <li className="flex items-start gap-2">
+                                            <User className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                                            <span>Email notifikasi dikirim ke user</span>
+                                        </li>
+                                        <li className="flex items-start gap-2">
+                                            <FileText className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                                            <span>Hasil original dibackup di record dispute</span>
+                                        </li>
                                     </ul>
                                 </div>
 
-                                <div className="flex gap-3">
+                                <div className="flex flex-col sm:flex-row gap-3 pt-2">
                                     <button
                                         onClick={handleApprove}
                                         disabled={loading || !adminNotes.trim()}
-                                        className="flex-1 px-4 py-3 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-semibold rounded-lg transition"
+                                        className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition shadow-lg"
                                     >
-                                        {loading ? '⏳ Processing...' : '✓ Approve & Update'}
+                                        {loading ? (
+                                            <>
+                                                <Loader2 className="w-5 h-5 animate-spin" />
+                                                Processing...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <CheckCircle2 className="w-5 h-5" />
+                                                Approve & Update
+                                            </>
+                                        )}
                                     </button>
                                     <button
                                         onClick={handleReject}
                                         disabled={loading || !adminNotes.trim()}
-                                        className="flex-1 px-4 py-3 bg-red-600 hover:bg-red-700 disabled:bg-gray-400 text-white font-semibold rounded-lg transition"
+                                        className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition shadow-lg"
                                     >
-                                        {loading ? '⏳ Processing...' : '✗ Reject'}
+                                        {loading ? (
+                                            <>
+                                                <Loader2 className="w-5 h-5 animate-spin" />
+                                                Processing...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <XCircle className="w-5 h-5" />
+                                                Reject
+                                            </>
+                                        )}
                                     </button>
                                     <button
                                         onClick={onClose}
                                         disabled={loading}
-                                        className="px-4 py-3 bg-gray-300 hover:bg-gray-400 text-gray-900 font-semibold rounded-lg transition"
+                                        className="px-4 py-3 bg-gray-200 hover:bg-gray-300 text-gray-900 font-semibold rounded-lg transition"
                                     >
                                         Close
                                     </button>

@@ -1,6 +1,8 @@
 import logging
 import hashlib
 import re
+import os
+from google import genai
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.decorators import api_view
@@ -12,7 +14,7 @@ from django.db import transaction, models
 from django.db.models import Q
 from django.http import Http404
 from django.conf import settings
-
+from django.core.cache import cache
 from .models import Claim, VerificationResult, Source, ClaimSource, Dispute
 from .serializers import (
     ClaimCreateSerializer, 
@@ -26,15 +28,24 @@ from .text_normalization import (
     calculate_text_similarity,
     normalize_claim_text
 )
-from .ai_adapter import call_ai_verify, determine_verification_label
+from .ai_adapter import call_ai_verify
 from .email_service import email_service
-from .models import Claim
 
 logger = logging.getLogger(__name__)
 
+_gemini_client = None
+
 # ===========================
-# Utility Functions - IMPROVED NORMALIZATION
+# Utility Functions 
 # ===========================
+def get_gemini_client():
+    global _gemini_client
+    if _gemini_client is None:
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY not found")
+        _gemini_client = genai.Client(api_key=api_key)
+    return _gemini_client
 
 def normalize_claim_text(text: str) -> str:
     """
@@ -172,349 +183,317 @@ def find_similar_claims(claim_text: str, threshold: float = 0.85) -> list:
     
     return similar_claims
 
+def translate_with_cache(text: str, target_lang: str, cache_prefix: str = "translate") -> str:
+    """Wrapper translate dengan cache berbasis Django cache framework.
+
+    Cache key dibangun dari prefix + target_lang + hash teks asli,
+    sehingga teks yang sama dan bahasa target yang sama tidak diterjemahkan ulang.
+    """
+    if not text:
+        return text
+
+    # Gunakan SHA256 agar key tetap pendek tapi unik
+    text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    cache_key = f"{cache_prefix}:{target_lang}:{text_hash}"
+
+    cached = cache.get(cache_key)
+    if cached:
+        return cached
+
+    translated = translate_text_gemini(text, target_lang)
+
+    # Simpan di cache, misal 24 jam (86400 detik)
+    try:
+        cache.set(cache_key, translated, timeout=86400)
+    except Exception as e:
+        logger.warning(f"[TRANSLATE_CACHE] Failed to set cache: {e}")
+
+    return translated
+
 # ===========================
 # Claim Views
 # ===========================
 
+@api_view(['POST'])
+def translate_verification_result(request):
+    """
+    POST /api/translate/
+    
+    Translate verification result (label + summary + claim_text) ke bahasa target.
+    
+    Body:
+    {
+        "label": "FAKTA",
+        "summary": "Merokok...",
+        "claim_text": "Merokok itu sehat",
+        "target_language": "en"  // or "id"
+    }
+    """
+    try:
+        label = request.data.get('label', '')
+        summary = request.data.get('summary', '')
+        claim_text = request.data.get('claim_text', '')
+        target_lang = request.data.get('target_language', 'en')
+        
+        if not label and not summary and not claim_text:
+            return Response({
+                'error': 'Label, summary, or claim_text required'
+            }, status=400)
+        
+        # Translate label
+        translated_label = translate_label(label, target_lang) if label else ''
+        
+        # Translate summary & claim text (dengan cache)
+        translated_summary = translate_with_cache(summary, target_lang, cache_prefix="translate:summary") if summary else ""
+        translated_claim_text = translate_with_cache(claim_text, target_lang, cache_prefix="translate:claim") if claim_text else ""
+        
+        return Response({
+            'translated_label': translated_label,
+            'translated_summary': translated_summary,
+            'translated_claim_text': translated_claim_text,
+            'original_label': label,
+            'original_summary': summary,
+            'original_claim_text': claim_text,
+            'target_language': target_lang
+        })
+        
+    except Exception as e:
+        logger.error(f"[TRANSLATE] Error: {e}")
+        return Response({
+            'error': 'Translation failed',
+            'detail': str(e)
+        }, status=500)
+
+def translate_label(label: str, target_lang: str) -> str:
+    """Translate label dengan mapping sederhana."""
+    label_lower = label.lower().strip()
+    
+    if target_lang == 'en':
+        mapping = {
+            'fakta': 'FACT',
+            'valid': 'VALID',
+            'hoax': 'HOAX',
+            'tidak pasti': 'UNCERTAIN',
+            'uncertain': 'UNCERTAIN',
+            'tidak terverifikasi': 'UNVERIFIED',
+            'unverified': 'UNVERIFIED'
+        }
+    else:  # Indonesian
+        mapping = {
+            'fact': 'FAKTA',
+            'valid': 'FAKTA',
+            'hoax': 'HOAX',
+            'uncertain': 'TIDAK PASTI',
+            'unverified': 'TIDAK TERVERIFIKASI'
+        }
+    
+    return mapping.get(label_lower, label.upper())
+
+def translate_text_gemini(text: str, target_lang: str) -> str:
+    """Translate text menggunakan Gemini API (output hanya teks terjemahan)."""
+    if not text or len(text) < 10:
+        return text
+    
+    lang_name = "English" if target_lang == 'en' else "Indonesian"
+    
+    prompt = f"""You are a professional medical translator.
+Translate the following medical/health text into {lang_name}.
+
+Requirements:
+- Output **only** the translated text in {lang_name}.
+- Do not add explanations, notes, alternative phrasings, or quotes.
+- Keep the style and length similar to the original.
+- Preserve medical terminology accuracy.
+
+Text to translate:
+{text}
+"""
+    
+    try:
+        client = get_gemini_client()
+        
+        resp = client.models.generate_content(
+            model="gemini-2.5-flash-lite",
+            contents=prompt,
+            config={
+                "temperature": 0.0,
+                "max_output_tokens": 1000
+            }
+        )
+        
+        # Extract text
+        if hasattr(resp, 'text'):
+            translated = resp.text.strip()
+        elif hasattr(resp, 'candidates') and resp.candidates:
+            if hasattr(resp.candidates[0], 'content'):
+                if hasattr(resp.candidates[0].content, 'parts'):
+                    translated = resp.candidates[0].content.parts[0].text.strip()
+                else:
+                    translated = str(resp.candidates[0].content)
+            else:
+                translated = text
+        else:
+            translated = text
+        
+        return translated or text
+        
+    except Exception as e:
+        logger.error(f"[TRANSLATE_GEMINI] Error: {e}")
+        return text  # Fallback to original
+
 class ClaimVerifyView(APIView):
-    """
-    POST endpoint untuk submit claim dan mendapatkan hasil verifikasi.
-    
-    Process:
-        1. Validate input claim text
-        2. Normalize text untuk consistency
-        3. Check exact match cache (by hash)
-        4. Check similar claims (semantic similarity)
-        5. Jika tidak ada match, process dengan AI verification
-        6. Save hasil dan return response
-    
-    Returns:
-        - 200: Verification result (dari cache atau baru)
-        - 400: Invalid request data
-        - 500: Verification failed
-    """
-    
-    # Label determination thresholds
-    CONFIDENCE_THRESHOLD_VALID = 0.75
-    CONFIDENCE_THRESHOLD_HOAX = 0.5
-    SIMILARITY_THRESHOLD = 0.90  # 90% similarity = consider as duplicate
+    """Main endpoint untuk verifikasi klaim."""
+
+    SIMILARITY_THRESHOLD = 0.90
 
     def post(self, request):
-        """Process claim verification request."""
+        """Terima klaim baru dan jalankan verifikasi AI (tanpa cache)."""
         logger.info(f"[VERIFY] Received request from {request.META.get('REMOTE_ADDR', 'unknown')}")
 
-        # Validate input
         serializer = ClaimCreateSerializer(data=request.data)
         if not serializer.is_valid():
             logger.warning(f"[VERIFY] Invalid request data: {serializer.errors}")
-            return Response(
-                serializer.errors,
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        # Ambil text klaim segera setelah validasi agar tidak ada UnboundLocalError
-        claim_text = serializer.validated_data.get('text', '')  # defensive: default ke ''
-        # logging singkat dari klaim (maks 80 char) — aman karena claim_text sudah ada
+        claim_text = serializer.validated_data.get("text", "")
         logger.info(f"[VERIFY] Processing claim: '{claim_text[:80]}...'")
 
-        # flag force refresh - pastikan cast ke bool
-        force_refresh = bool(request.data.get('_force_refresh', False))
-
-        # Skip cache jika force refresh
-        if not force_refresh:
-            cached_response = self._get_cached_result(claim_text)
-            if cached_response:
-                return cached_response
-
-        # Process new claim
         try:
             claim = self._create_new_claim(claim_text)
-            verification = self._process_verification(claim)
+            self._process_verification(claim)
 
-            # Update claim status to done
             claim.status = Claim.STATUS_DONE
             claim.save()
 
-            # Return response
             logger.info(f"[VERIFY] Successfully processed claim {claim.id}")
-            response_data = ClaimDetailSerializer(claim).data
-            return Response(response_data, status=status.HTTP_200_OK)
+            data = ClaimDetailSerializer(claim).data
+            return Response(data, status=status.HTTP_200_OK)
 
         except Exception as e:
-            # Jika terjadi error di sini, pastikan kita punya claim_text untuk context (bisa kosong)
-            logger.error(f"[VERIFY] Verification failed: {str(e)}", exc_info=True)
+            logger.error(f"[VERIFY] Verification failed: {e}", exc_info=True)
             return self._handle_verification_error(e, claim_text, request)
-    
-    def _get_cached_result(self, claim_text):
-        """
-        Check if claim has been verified before (exact match by hash).
-        
-        PENTING: Juga check apakah verification result sudah di-update 
-        (misalnya dari dispute approval).
-        
-        Args:
-            claim_text (str): The claim text to check
-            
-        Returns:
-            Response or None: Response object if cached, None otherwise
-        """
-        is_cached, cache_claim, cached_verification = check_cached_result(claim_text)
 
-        if is_cached:
-            # ✅ TAMBAHAN: Check fresh verification
-            fresh_verification = VerificationResult.objects.filter(
-                claim=cache_claim
-            ).latest('updated_at')
-            
-            # ✅ Compare timestamps
-            if fresh_verification.updated_at > cached_verification.updated_at:
-                logger.info("[CACHE] Verification was UPDATED!")
-                cached_verification = fresh_verification  # Use fresh!
-            
-            # Serialize the claim for response
-            serializer = ClaimDetailSerializer(cache_claim)
-            return Response({
-                **serializer.data,
-                '_from_cache': True,
-                '_updated_at': fresh_verification.updated_at.isoformat()
-            })
-    
-    def _check_similar_claims(self, claim_text):
-        """
-        Check for semantically similar claims.
-        
-        Args:
-            claim_text (str): The claim text to check
-            
-        Returns:
-            Response or None: Response object if similar claim found, None otherwise
-        """
-        try:
-            similar_claims = find_similar_claims(claim_text, threshold=self.SIMILARITY_THRESHOLD)
-            
-            if similar_claims:
-                best_match = similar_claims[0]
-                similarity = best_match['similarity']
-                matched_claim = best_match['claim']
-                
-                logger.info(
-                    f"[VERIFY] Similar claim found - "
-                    f"Claim ID: {matched_claim.id}, "
-                    f"Similarity: {similarity:.2%}"
-                )
-                
-                # Get verification result
-                if hasattr(matched_claim, 'verification_result'):
-                    response_data = ClaimDetailSerializer(matched_claim).data
-                    response_data['_cache_hit'] = 'similar'
-                    response_data['_similarity_score'] = round(similarity, 4)
-                    response_data['_matched_claim_id'] = matched_claim.id
-                    
-                    logger.info(
-                        f"[VERIFY] Cache HIT (similar) - "
-                        f"Using result from Claim ID: {matched_claim.id}"
-                    )
-                    
-                    return Response(response_data, status=status.HTTP_200_OK)
-        
-        except Exception as e:
-            logger.warning(f"[VERIFY] Error checking similar claims: {e}")
-        
-        return None
-    
-    def _create_new_claim(self, claim_text):
-        """
-        Create new Claim object in database.
-        
-        Args:
-            claim_text (str): The claim text
-            
-        Returns:
-            Claim: Created claim object
-        """
+    # Helper: create new Claim
+    def _create_new_claim(self, claim_text: str) -> Claim:
         normalized_text = normalize_claim_text(claim_text)
         text_hash = generate_claim_hash(claim_text)
-        
+
         claim = Claim.objects.create(
             text=claim_text,
             text_normalized=normalized_text,
             text_hash=text_hash,
-            status=Claim.STATUS_PROCESSING
+            status=Claim.STATUS_PROCESSING,
         )
-        
+
         logger.info(
-            f"[VERIFY] Created Claim ID: {claim.id} "
-            f"(hash: {text_hash[:16]}...)"
+            f"[VERIFY] Created Claim ID: {claim.id} (hash: {text_hash[:16]}...)"
         )
         logger.debug(f"[VERIFY] Normalized: '{normalized_text}'")
-        
         return claim
-    
-    def _process_verification(self, claim):
-        """
-        Process AI verification and create VerificationResult.
-        
-        Args:
-            claim (Claim): The claim to verify
-            
-        Returns:
-            VerificationResult: Created verification result
-            
-        Raises:
-            Exception: If AI verification fails
-        """
-        # Call AI verification service
+
+    # Helper: call AI and create VerificationResult
+    def _process_verification(self, claim: Claim) -> VerificationResult:
         ai_result = call_ai_verify(claim.text)
-        
+
         logger.info(f"[VERIFY] AI verification completed for claim {claim.id}")
-        logger.debug(f"[VERIFY] AI result summary: {ai_result.get('summary', '')[:100]}...")
-        
-        # Extract results
-        sources_data = ai_result.get('sources', [])
-        confidence = ai_result.get('confidence')  # Bisa None untuk unverified
-        summary = ai_result.get('summary', '')
-        label = ai_result.get('label', 'unverified')
+        logger.debug(
+            f"[VERIFY] AI result summary: {ai_result.get('summary', '')[:100]}..."
+        )
 
-        # Validate label
-        valid_labels = ['valid', 'hoax', 'uncertain', 'unverified']
+        sources_data = ai_result.get("sources", [])
+        confidence = ai_result.get("confidence")
+        summary = ai_result.get("summary", "")
+        label = ai_result.get("label", "unverified")
+
+        valid_labels = ["valid", "hoax", "uncertain", "unverified"]
         if label not in valid_labels:
-            logger.warning(f"[VERIFY] Invalid label '{label}' dari AI, fallback ke 'unverified'")
-            label = 'unverified'
+            logger.warning(
+                f"[VERIFY] Invalid label '{label}' dari AI, fallback ke 'unverified'"
+            )
+            label = "unverified"
 
-        # Create verification result
         verification = VerificationResult.objects.create(
             claim=claim,
             label=label,
             summary=summary,
-            confidence=confidence,  # None untuk unverified
-            logic_version="v2.0"
+            confidence=confidence,
+            logic_version="v2.0",
         )
-        
+
         logger.info(
             f"[VERIFY] Created VerificationResult ID: {verification.id} - "
             f"Label: {label}, "
             f"Confidence: {confidence if confidence is not None else 'N/A'}, "
-            f"Sources: {len(sources_data)}"
+            f"Sources: {len(sources_data)}",
         )
-        
-        # Process and link sources
+
         if sources_data:
             self._process_sources(claim, sources_data)
-        
+
         return verification
-    
-    def _process_sources(self, claim, sources_data):
-        """
-        Process and link sources to claim.
-        
-        Args:
-            claim (Claim): The claim object
-            sources_data (list): List of source dictionaries from AI
-        """
+
+    def _process_sources(self, claim: Claim, sources_data):
+        """Simpan dan kaitkan sumber AI ke ClaimSource/Source."""
         processed_count = 0
-        
+
         for idx, source_data in enumerate(sources_data):
             try:
                 source = self._create_or_get_source(source_data)
-                
-                # Create ClaimSource relationship
-                ClaimSource.objects.create(
-                    claim=claim,
-                    source=source,
-                    relevance_score=source_data.get('relevance_score', 0.0),
-                    excerpt=source_data.get('excerpt', ''),
-                    rank=idx + 1
-                )
-                
-                processed_count += 1
-                
+
+                if ClaimSource.objects.filter(claim=claim, source=source).exists():
+                    logger.info(
+                        f"[VERIFY] Duplicate ClaimSource skipped for claim {claim.id} "
+                        f"and source {source.id}"
+                    )
+                else:
+                    ClaimSource.objects.create(
+                        claim=claim,
+                        source=source,
+                        relevance_score=source_data.get("relevance_score", 0.0),
+                        excerpt=source_data.get("excerpt", ""),
+                        rank=idx + 1,
+                    )
+                    processed_count += 1
+
             except Exception as e:
                 logger.error(
-                    f"[VERIFY] Failed to process source {idx + 1}: {str(e)}", 
-                    exc_info=True
+                    f"[VERIFY] Error processing source for claim {claim.id}: {e}",
+                    exc_info=True,
                 )
-        
+
         logger.info(
-            f"[VERIFY] Linked {processed_count}/{len(sources_data)} sources to claim {claim.id}"
+            f"[VERIFY] Linked {processed_count}/{len(sources_data)} sources "
+            f"to claim {claim.id}"
         )
-    
+
     def _create_or_get_source(self, source_data):
-        """
-        Create or retrieve existing Source object.
-        
-        Args:
-            source_data (dict): Source information from AI
-            
-        Returns:
-            Source: Created or existing source object
-        """
-        doi = source_data.get('doi', '').strip()
-        url = source_data.get('url', '').strip()
-        
-        # Try to find existing source by DOI or URL
+        """Buat atau ambil Source berdasarkan DOI/URL."""
+        doi = (source_data.get("doi") or "").strip()
+        url = (source_data.get("url") or "").strip()
+
         if doi:
-            source = Source.objects.filter(doi=doi).first()
-            if source:
-                return source
-        
+            existing = Source.objects.filter(doi=doi).first()
+            if existing:
+                return existing
+
         if url:
-            source = Source.objects.filter(url=url).first()
-            if source:
-                return source
-        
-        # Create new source
+            existing = Source.objects.filter(url=url).first()
+            if existing:
+                return existing
+
         source = Source.objects.create(
-            title=source_data.get('title', 'Unknown')[:500],
-            doi=doi if doi else None,
-            url=url if url else None,
-            authors=source_data.get('authors', ''),
-            publisher=source_data.get('publisher', '')[:255],
-            published_date=source_data.get('published_date'),
-            source_type=source_data.get('source_type', 'journal'),
-            credibility_score=source_data.get('credibility_score', 0.5)
+            title=(source_data.get("title") or "Unknown")[:500],
+            doi=doi or None,
+            url=url or None,
+            authors=source_data.get("authors", ""),
+            publisher=(source_data.get("publisher") or "")[:255],
+            published_date=source_data.get("published_date"),
+            source_type=source_data.get("source_type", "journal"),
+            credibility_score=source_data.get("credibility_score", 0.5),
         )
-        
+
         logger.debug(f"[VERIFY] Created new Source ID: {source.id}")
         return source
-    
-    def _handle_verification_error(self, error, claim_text, request):
-        """
-        Handle verification errors gracefully.
-        
-        Args:
-            error (Exception): The exception that occurred
-            claim_text (str): The claim text being processed
-            request: The HTTP request object
-            
-        Returns:
-            Response: Error response
-        """
-        logger.error(f"[VERIFY] Verification error: {str(error)}", exc_info=True)
-        
-        # Try to send admin notification
-        try:
-            email_service.notify_admin_system_error(
-                error_type="Claim Verification Failed",
-                error_message=str(error),
-                context={
-                    'claim_text': claim_text[:100],
-                    'user_ip': request.META.get('REMOTE_ADDR', 'unknown'),
-                    'error_type': type(error).__name__
-                }
-            )
-        except Exception as email_error:
-            logger.error(
-                f"[VERIFY] Failed to send error notification: {str(email_error)}"
-            )
-        
-        return Response(
-            {
-                'error': 'Verification failed',
-                'message': 'Terjadi kesalahan saat memverifikasi klaim. Tim kami telah diberitahu.',
-                'detail': str(error) if settings.DEBUG else None
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
 
 class ClaimDetailView(APIView):
     """
@@ -1048,7 +1027,6 @@ def check_claim_duplicate(request):
             for m in result.get('all_matches', [])[:5]
         ]
     })
-
 
 def _get_explanation(similarity: float) -> str:
     """Helper function untuk penjelasan"""

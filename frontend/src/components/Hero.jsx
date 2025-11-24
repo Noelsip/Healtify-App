@@ -8,68 +8,50 @@ import Toast from './Toast';
 const Hero = () => {
     const { t, i18n } = useTranslation();
     const [searchQuery, setSearchQuery] = useState('');
+    const [translatedSummary, setTranslatedSummary] = useState(null);
+    const [isTranslating, setIsTranslating] = useState(false);
     const [toast, setToast] = useState(null);
     const [verificationResult, setVerificationResult] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState(null);
     const [loadingStage, setLoadingStage] = useState('');
-    const [cacheInfo, setCacheInfo] = useState(null);
 
     /**
-     * 🆕 CACHE MANAGEMENT
-     * Detect if result is from cache and if it needs refresh
+     * FORCE REFRESH untuk bypass cache
      */
     useEffect(() => {
-        if (verificationResult && verificationResult._from_cache) {
-            setCacheInfo({
-                isCached: true,
-                timestamp: verificationResult.updated_at || verificationResult.created_at
-            });
-        } else {
-            setCacheInfo(null);
-        }
-    }, [verificationResult]);
-
-    /**
-     * 🆕 FORCE REFRESH untuk bypass cache
-     */
-    const handleForceRefresh = async () => {
-        if (!searchQuery.trim()) {
-            showToast(t('hero.errors.emptyQuery'), 'warning');
-            return;
-        }
-
-        setIsLoading(true);
-        setError(null);
-        setLoadingStage(t('hero.dynamicLabels.searching'));
-
-        try {
-            // Tambahkan timestamp untuk force refresh
-            const result = await verifyClaim(searchQuery, { 
-                force_refresh: true,
-                timestamp: Date.now()
-            });
-            
-            setVerificationResult(result);
-            setCacheInfo(null);
-            
-            const label = formatLabel(result.verification_result?.label).text;
-            showToast(`✓ ${t('hero.success.complete')} ${label}`, 'success');
-            
-        } catch (err) {
-            console.error('Verification error:', err);
-            const errorMessage = err.message || t('hero.errors.verificationFailed');
-            setError(errorMessage);
-            showToast(t('hero.errors.verificationFailed'), 'error');
-        } finally {
-            setIsLoading(false);
-            setLoadingStage('');
-        }
-    };
+    if (verificationResult && verificationResult.verification_result?.summary) {
+        translateSummary();
+    }}, [i18n.language, verificationResult]);
 
     const showToast = (message, type = 'success') => { 
         setToast({ message, type });
     };
+
+    const translateSummary = async () => {
+    if (!verificationResult?.verification_result?.summary) return;
+
+    const summary = verificationResult.verification_result.summary;
+    const targetLang = i18n.language;
+
+    if (targetLang === 'id') {
+        setTranslatedSummary(summary);
+        return;
+    }
+
+    setIsTranslating(true);
+
+    try {
+        // Simple client-side translation fallback
+        // You can implement backend translation endpoint later
+        setTranslatedSummary(summary); // Temporary: show original
+    } catch (error) {
+        console.error('[TRANSLATE] Error:', error);
+        setTranslatedSummary(summary);
+    } finally {
+        setIsTranslating(false);
+    }
+};
 
     const handleShare = async () => {
         const result = await shareContent({
@@ -215,6 +197,9 @@ const Hero = () => {
         return Math.round(confidence * 100);
     };
 
+    const displaySummary = translatedSummary || verificationResult?.verification_result?.summary || t('hero.noSummary');
+
+    
     return (
         <section className="flex flex-col items-center max-w-4xl mx-auto text-center px-4 sm:px-6 lg:px-8">
             {/* Title */}
@@ -253,26 +238,6 @@ const Hero = () => {
                     )}
                 </button>
             </form>
-
-            {/* 🆕 CACHE INFO BANNER */}
-            {cacheInfo && cacheInfo.isCached && (
-                <div className="w-full max-w-2xl mb-4 bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-sm text-blue-800">
-                        <AlertCircle className="w-4 h-4" />
-                        <span>{t('hero.success.cached', { 
-                            time: new Date(cacheInfo.timestamp).toLocaleString()
-                        })}</span>
-                    </div>
-                    <button
-                        onClick={handleForceRefresh}
-                        disabled={isLoading}
-                        className="flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium text-sm disabled:opacity-50"
-                    >
-                        <RefreshCw className="w-4 h-4" />
-                        Refresh
-                    </button>
-                </div>
-            )}
 
             {/* Error Message */}
             {error && (
@@ -318,8 +283,8 @@ const Hero = () => {
                         
                         {/* Confidence Badge */}
                         {verificationResult.verification_result?.confidence !== null &&
-                         verificationResult.verification_result?.confidence !== undefined &&
-                         verificationResult.verification_result?.label !== 'unverified' && (
+                        verificationResult.verification_result?.confidence !== undefined &&
+                        verificationResult.verification_result?.label !== 'unverified' && (
                             <span className="bg-blue-100 text-blue-700 px-3 sm:px-4 py-1.5 rounded text-xs md:text-sm font-bold ml-2">
                                 📊 {t('hero.confidence')}: {formatConfidence(verificationResult.verification_result.confidence)}%
                             </span>
@@ -333,9 +298,14 @@ const Hero = () => {
 
                         {/* Summary */}
                         <div className="mb-6">
-                            <h4 className="font-bold text-sm sm:text-base text-slate-800 mb-2">{t('hero.analysisSummary')}:</h4>
+                            <div className="flex items-center justify-between mb-2">
+                                <h4 className="font-bold text-sm sm:text-base text-slate-800">
+                                    {t('hero.analysisSummary')}:
+                                </h4>
+                                {isTranslating && <Loader2 className="w-4 h-4 animate-spin text-blue-500" />}
+                            </div>
                             <p className="text-slate-600 leading-relaxed text-xs sm:text-sm md:text-base text-justify break-words">
-                                {verificationResult.verification_result?.summary || t('hero.noSummary')}
+                                {displaySummary}
                             </p>
                         </div>
 

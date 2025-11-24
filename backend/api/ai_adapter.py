@@ -59,7 +59,7 @@ def normalize_claim_text(text: str) -> str:
 
 def is_health_related_claim(claim_text: str, summary: str = "") -> bool:
     """
-    🔧 FIXED: Deteksi health-related dengan support BILINGUAL dan threshold yang lebih baik.
+    🔧 IMPROVED: Deteksi health-related dengan support BILINGUAL dan threshold yang lebih baik.
     
     Returns True jika klaim berkaitan dengan kesehatan.
     """
@@ -69,7 +69,7 @@ def is_health_related_claim(claim_text: str, summary: str = "") -> bool:
         'kanker', 'diabetes', 'jantung', 'darah', 'kulit', 'wajah',
         'imun', 'infeksi', 'virus', 'bakteri', 'gejala', 'diagnosa',
         'vaksin', 'antibiotik', 'herbal', 'suplemen', 'olahraga',
-        'tidur', 'stress', 'mental', 'depresi', 'kecemasan'
+        'tidur', 'stress', 'mental', 'depresi', 'kecemasan', 'uap'
     }
     
     health_keywords_en = {
@@ -78,20 +78,22 @@ def is_health_related_claim(claim_text: str, summary: str = "") -> bool:
         'cancer', 'diabetes', 'heart', 'blood', 'skin', 'face',
         'immune', 'infection', 'virus', 'bacteria', 'symptom', 'diagnosis',
         'vaccine', 'antibiotic', 'herbal', 'supplement', 'exercise',
-        'sleep', 'stress', 'mental', 'depression', 'anxiety',
+        'sleep', 'stress', 'mental', 'depression', 'anxiety', 'steam',
         # 🆕 TAMBAHAN untuk klaim medis umum
         'study', 'research', 'clinical', 'trial', 'patient', 'cure',
-        'prevent', 'risk', 'effect', 'cause', 'benefit', 'harmful'
+        'prevent', 'risk', 'effect', 'cause', 'benefit', 'harmful',
+        'scientific', 'evidence', 'journal', 'dermatology', 'facial'
     }
     
     # 🆕 MEDICAL PATTERNS untuk deteksi lebih luas
     medical_patterns = [
-        r'\b(steam|facial|skin)\s+(therapy|treatment|care)\b',  # "facial steaming"
+        r'\b(steam|facial|skin)\s+(therapy|treatment|care)\b',
         r'\b(health|medical)\s+(benefit|effect|risk)\b',
         r'\bcause[s]?\s+(cancer|disease|illness)\b',
         r'\bprevent[s]?\s+(disease|infection)\b',
         r'\btreat[s]?\s+(condition|symptom)\b',
-        r'\b(reduce|increase)[s]?\s+(risk|immunity)\b'
+        r'\b(reduce|increase)[s]?\s+(risk|immunity)\b',
+        r'\b(clinical|scientific)\s+(study|research|evidence)\b'
     ]
     
     all_keywords = health_keywords_id | health_keywords_en
@@ -107,12 +109,12 @@ def is_health_related_claim(claim_text: str, summary: str = "") -> bool:
     # Method 2: Pattern matching
     pattern_matches = sum(1 for pattern in medical_patterns if re.search(pattern, combined_text, re.I))
     
-    # 🔧 FIXED: Lower threshold dan multiple detection methods
+    # 🔧 IMPROVED: Lower threshold dan multiple detection methods
     total_matches = keyword_matches + pattern_matches
     
     # Adaptive threshold berdasarkan panjang klaim
     word_count = len(combined_text.split())
-    threshold = 1 if word_count < 10 else 2  # Lebih lenient untuk klaim pendek
+    threshold = 1 if word_count < 10 else 1  # Lebih lenient
     
     is_health = total_matches >= threshold
     
@@ -125,13 +127,13 @@ def determine_verification_label(confidence_score: float, has_sources: bool = Tr
                                 has_journal: bool = False, claim_text: str = "", 
                                 summary: str = "") -> str:
     """
-    🔧 FIXED: Label determination dengan fallback mechanism yang lebih baik.
+    🔧 IMPROVED: Label determination dengan fallback mechanism yang lebih baik.
     
-    Label Rules:
-    1. TIDAK TERVERIFIKASI: Jika bukan topik kesehatan ATAU tidak ada jurnal
-    2. FAKTA (valid): confidence >= 0.75 dan ada sumber jurnal
-    3. HOAX: confidence <= 0.5 dan ada sumber jurnal
-    4. TIDAK PASTI (uncertain): 0.5 < confidence < 0.75 dan ada sumber jurnal
+    Label Rules (RELAXED):
+    1. TIDAK TERVERIFIKASI: Jika tidak ada sumber ATAU confidence < 0.3
+    2. FAKTA (valid): confidence >= 0.65 dan ada sumber
+    3. HOAX: confidence <= 0.35 dan ada sumber
+    4. TIDAK PASTI (uncertain): 0.35 < confidence < 0.65 dan ada sumber
     """
     try:
         c = float(confidence_score)
@@ -143,38 +145,35 @@ def determine_verification_label(confidence_score: float, has_sources: bool = Tr
         c /= 100.0
     c = max(0.0, min(c, 1.0))
     
-    # Check if health-related (with improved detection)
+    # 🆕 IMPROVED: Check if health-related (with better detection)
     is_health = is_health_related_claim(claim_text, summary)
     
-    # 🔧 FIXED: Fallback untuk English claims tanpa keyword match
-    if not is_health and has_sources and has_journal:
-        logger.warning(f"[LABEL] Claim might be health-related but keywords not detected")
-        logger.warning(f"        However, journal sources found - treating as health claim")
-        is_health = True  # Override jika ada journal sources
+    # 🆕 NEW: Jika ada sources journal, prioritaskan itu
+    if has_sources and has_journal:
+        # Ada journal sources - proceed dengan label berdasarkan confidence
+        if c >= 0.65:  # Lowered from 0.75
+            logger.info(f"[LABEL] Confidence {c:.2f} >= 0.65 + journal sources -> FAKTA")
+            return 'valid'
+        elif c <= 0.35:  # Lowered from 0.5
+            logger.info(f"[LABEL] Confidence {c:.2f} <= 0.35 + journal sources -> HOAX")
+            return 'hoax'
+        else:
+            logger.info(f"[LABEL] Confidence {c:.2f} between 0.35-0.65 + journal sources -> TIDAK PASTI")
+            return 'uncertain'
     
-    # Rule 1: TIDAK TERVERIFIKASI jika bukan topik kesehatan
-    if not is_health:
-        logger.info(f"[LABEL] Claim tidak berkaitan dengan kesehatan -> TIDAK TERVERIFIKASI")
+    # 🆕 NEW: Jika tidak ada journal tapi ada sources + confidence tinggi
+    if has_sources and c >= 0.7:
+        logger.info(f"[LABEL] No journal but high confidence {c:.2f} + sources -> TIDAK PASTI")
+        return 'uncertain'
+    
+    # 🆕 NEW: Jika tidak health-related tapi ada sources berkualitas
+    if not is_health and has_sources and c >= 0.5:
+        logger.warning(f"[LABEL] Not health-related but has quality sources -> TIDAK TERVERIFIKASI")
         return 'unverified'
     
-    # Rule 2: TIDAK TERVERIFIKASI jika tidak ada jurnal
-    if not has_journal:
-        logger.info(f"[LABEL] Tidak ada sumber jurnal -> TIDAK TERVERIFIKASI")
-        return 'unverified'
-    
-    # Rule 3: FAKTA jika confidence >= 0.75
-    if c >= 0.75:
-        logger.info(f"[LABEL] Confidence {c:.2f} >= 0.75 -> FAKTA")
-        return 'valid'
-    
-    # Rule 4: HOAX jika confidence <= 0.5
-    if c <= 0.5:
-        logger.info(f"[LABEL] Confidence {c:.2f} <= 0.5 -> HOAX")
-        return 'hoax'
-    
-    # Rule 5: TIDAK PASTI jika 0.5 < confidence < 0.75
-    logger.info(f"[LABEL] Confidence {c:.2f} between 0.5-0.75 -> TIDAK PASTI")
-    return 'uncertain'
+    # Fallback: TIDAK TERVERIFIKASI
+    logger.info(f"[LABEL] Fallback -> TIDAK TERVERIFIKASI (sources={has_sources}, journal={has_journal}, conf={c:.2f})")
+    return 'unverified'
 
 
 def map_ai_label_to_backend(ai_label: str) -> str:

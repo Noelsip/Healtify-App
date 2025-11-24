@@ -63,6 +63,22 @@ def load_env():
 
 load_env()
 
+def translate_to_english_fast(text: str) -> str:
+    """Fast translation untuk query expansion."""
+    try:
+        client = get_gemini_client()
+        prompt = f"Translate to English (medical terms): {text}\nOutput translation only."
+        
+        resp = client.models.generate_content(
+            model="gemini-2.5-flash-lite",
+            contents=prompt,
+            config={"temperature": 0.0, "max_output_tokens": 100}
+        )
+        
+        return extract_llm_text(resp).strip() or text
+    except:
+        return text
+
 # Lazy client initialization
 _gemini_client = None
 def get_gemini_client():
@@ -486,23 +502,36 @@ def fetch_pubmed_fast(query: str, limit: int = 5) -> List[Dict]:
         return []
 
 def parallel_fetch_all(claim: str, limit_per_source: int = 5) -> List[Dict]:
-    """Fetch dari semua source secara PARALLEL."""
-    
+    """
+    🔧 IMPROVED: Fetch dengan bilingual queries untuk hasil internasional.
+    """
     logger.info(f"[PARALLEL_FETCH] Fetching for: {claim[:60]}")
+    
     # Check cache
     cache_key = f"fetch:{text_hash(claim)}"
     cached = fetch_cache.get(cache_key)
     if cached:
-        print("[FETCH] Cache hit!", file=sys.stderr)
+        logger.info("[FETCH] Cache hit!")
         return cached
+    
+    # 🆕 Translate to English for better international results
+    logger.info("[FETCH] Translating to English...")
+    claim_en = translate_to_english_fast(claim)
+    logger.info(f"[FETCH] English query: {claim_en[:60]}")
     
     all_items = []
     
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        # Use BOTH Indonesian and English queries
         futures = {
-            executor.submit(fetch_crossref_fast, claim, limit_per_source): "crossref",
-            executor.submit(fetch_semantic_fast, claim, limit_per_source): "semantic",
-            executor.submit(fetch_pubmed_fast, claim, limit_per_source): "pubmed",
+            # Indonesian query
+            executor.submit(fetch_crossref_fast, claim, limit_per_source): "crossref_id",
+            executor.submit(fetch_semantic_fast, claim, limit_per_source): "semantic_id",
+            executor.submit(fetch_pubmed_fast, claim, limit_per_source): "pubmed_id",
+            # 🆕 English query for international journals
+            executor.submit(fetch_crossref_fast, claim_en, limit_per_source): "crossref_en",
+            executor.submit(fetch_semantic_fast, claim_en, limit_per_source): "semantic_en",
+            executor.submit(fetch_pubmed_fast, claim_en, limit_per_source): "pubmed_en",
         }
         
         for future in futures:
@@ -510,17 +539,30 @@ def parallel_fetch_all(claim: str, limit_per_source: int = 5) -> List[Dict]:
                 result = future.result(timeout=TOTAL_FETCH_TIMEOUT)
                 if result:
                     all_items.extend(result)
-                    print(f"[FETCH] {futures[future]}: {len(result)} items", file=sys.stderr)
+                    logger.info(f"[FETCH] {futures[future]}: {len(result)} items")
             except FuturesTimeoutError:
-                print(f"[FETCH] {futures[future]}: timeout", file=sys.stderr)
+                logger.warning(f"[FETCH] {futures[future]}: timeout")
             except Exception as e:
-                print(f"[FETCH] {futures[future]}: {e}", file=sys.stderr)
+                logger.warning(f"[FETCH] {futures[future]}: {e}")
+    
+    # Remove duplicates based on DOI
+    seen_dois = set()
+    unique_items = []
+    for item in all_items:
+        doi = item.get("doi", "")
+        if doi and doi in seen_dois:
+            continue
+        if doi:
+            seen_dois.add(doi)
+        unique_items.append(item)
+    
+    logger.info(f"[FETCH] Total unique items: {len(unique_items)}")
     
     # Cache results
-    if all_items:
-        fetch_cache.set(cache_key, all_items)
+    if unique_items:
+        fetch_cache.set(cache_key, unique_items)
     
-    return all_items
+    return unique_items
 
 # ============================================
 # FAST INGEST (IN-MEMORY ONLY FOR SPEED)

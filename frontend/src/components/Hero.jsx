@@ -1,35 +1,76 @@
-import { Search, Share2, FileText, Loader2, AlertCircle } from "lucide-react";
-import { useState } from "react";
+import { Search, Share2, FileText, Loader2, AlertCircle, RefreshCw } from "lucide-react";
+import { useState, useEffect } from "react";
 import { useTranslation } from 'react-i18next';
 import { copyToClipboard, shareContent } from '../utils/shareUtils';
 import { verifyClaim } from "../services/api";
-import Toast from './Toast'
+import Toast from './Toast';
 
 const Hero = () => {
-    const { t } = useTranslation();
+    const { t, i18n } = useTranslation();
     const [searchQuery, setSearchQuery] = useState('');
     const [toast, setToast] = useState(null);
-
-    // State untuk menampung hasil verifikasi
     const [verificationResult, setVerificationResult] = useState(null);
-
-    // State untuk loading
     const [isLoading, setIsLoading] = useState(false);
-
-    // State untuk error
     const [error, setError] = useState(null);
+    const [loadingStage, setLoadingStage] = useState('');
+    const [cacheInfo, setCacheInfo] = useState(null);
 
     /**
-     * Menampilkan Notifikasi toast
+     * 🆕 CACHE MANAGEMENT
+     * Detect if result is from cache and if it needs refresh
      */
+    useEffect(() => {
+        if (verificationResult && verificationResult._from_cache) {
+            setCacheInfo({
+                isCached: true,
+                timestamp: verificationResult.updated_at || verificationResult.created_at
+            });
+        } else {
+            setCacheInfo(null);
+        }
+    }, [verificationResult]);
+
+    /**
+     * 🆕 FORCE REFRESH untuk bypass cache
+     */
+    const handleForceRefresh = async () => {
+        if (!searchQuery.trim()) {
+            showToast(t('hero.errors.emptyQuery'), 'warning');
+            return;
+        }
+
+        setIsLoading(true);
+        setError(null);
+        setLoadingStage(t('hero.dynamicLabels.searching'));
+
+        try {
+            // Tambahkan timestamp untuk force refresh
+            const result = await verifyClaim(searchQuery, { 
+                force_refresh: true,
+                timestamp: Date.now()
+            });
+            
+            setVerificationResult(result);
+            setCacheInfo(null);
+            
+            const label = formatLabel(result.verification_result?.label).text;
+            showToast(`✓ ${t('hero.success.complete')} ${label}`, 'success');
+            
+        } catch (err) {
+            console.error('Verification error:', err);
+            const errorMessage = err.message || t('hero.errors.verificationFailed');
+            setError(errorMessage);
+            showToast(t('hero.errors.verificationFailed'), 'error');
+        } finally {
+            setIsLoading(false);
+            setLoadingStage('');
+        }
+    };
 
     const showToast = (message, type = 'success') => { 
         setToast({ message, type });
     };
 
-    /**
-     * Handle Share Button
-     */
     const handleShare = async () => {
         const result = await shareContent({
             title: 'Healthify - ' + t('hero.desc'),
@@ -44,9 +85,6 @@ const Hero = () => {
         }
     };
 
-    /** 
-     * Handle Copy Button
-     */
     const handleCopy = async () => {
         if (!verificationResult) {
             showToast('No verification result to copy', 'warning');
@@ -63,9 +101,6 @@ const Hero = () => {
         }
     };
 
-    /**
-     * Generate formatted text untuk copy/share
-     */
     const generateShareText = () => {
         if (!verificationResult) return '';
 
@@ -77,18 +112,19 @@ const Hero = () => {
         text += `🔍 HEALTHIFY - Health Claim Verification\n`;
         text += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
         
-        text += `📋 Your Claim:\n`;
+        text += `📋 ${t('hero.yourClaim')}:\n`;
         text += `"${verificationResult.text}"\n\n`;
         
-        text += `🏷️ Verification Result: ${label}\n`;
-        text += `📊 Confidence: ${confidence}%\n\n`;
+        text += `🏷️ ${t('hero.analysisSummary')}: ${label}\n`;
+        if (confidence) {
+            text += `📊 ${t('hero.confidence')}: ${confidence}%\n\n`;
+        }
         
-        text += `📝 Analysis Summary:\n`;
+        text += `📝 ${t('hero.analysisSummary')}:\n`;
         text += `${summary}\n\n`;
         
-        // Add sources if available
         if (verificationResult.sources && verificationResult.sources.length > 0) {
-            text += `📚 References:\n`;
+            text += `📚 ${t('hero.reference')}:\n`;
             verificationResult.sources.forEach((sourceItem, index) => {
                 const source = sourceItem.source || {};
                 const title = source.title || 'No Title Available';
@@ -103,7 +139,7 @@ const Hero = () => {
                     text += `\n   URL: ${url}`;
                 }
                 if (relevanceScore > 0) {
-                    text += `\n   Relevance: ${Math.round(relevanceScore * 100)}%`;
+                    text += `\n   ${t('hero.relevance')}: ${Math.round(relevanceScore * 100)}%`;
                 }
                 text += `\n`;
             });
@@ -111,8 +147,8 @@ const Hero = () => {
         }
         
         text += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-        text += `✅ Verified by: Healthify AI\n`;
-        text += `📅 Date: ${new Date(verificationResult.created_at).toLocaleDateString('id-ID', {
+        text += `✅ ${t('hero.verifiedBy')}\n`;
+        text += `📅 ${new Date(verificationResult.created_at).toLocaleDateString(i18n.language === 'id' ? 'id-ID' : 'en-US', {
             day: 'numeric',
             month: 'long',
             year: 'numeric'
@@ -123,63 +159,61 @@ const Hero = () => {
         return text;
     };
 
-    /**
-     * Handle Search/verify Form Submit
-     */
     const handleSearch = async (e) => {
         e.preventDefault();
 
         if (!searchQuery.trim()) {
-            showToast('Please enter a claim to verify', 'warning');
+            showToast(t('hero.errors.emptyQuery'), 'warning');
             return;
         }
 
         setIsLoading(true);
         setError(null);
         setVerificationResult(null);
+        setLoadingStage(t('hero.dynamicLabels.analyzing'));
 
         try {
+            // 🔧 Progress simulation untuk UX yang lebih baik
+            setTimeout(() => setLoadingStage(t('hero.dynamicLabels.searching')), 3000);
+            setTimeout(() => setLoadingStage(t('hero.dynamicLabels.evaluating')), 10000);
+            setTimeout(() => setLoadingStage(t('hero.dynamicLabels.finalizing')), 20000);
+
             const result = await verifyClaim(searchQuery);
             setVerificationResult(result);
             
-            // Show success toast dengan label
             const label = formatLabel(result.verification_result?.label).text;
-            showToast(`✓ Verification complete! Result: ${label}`, 'success');
+            showToast(`✓ ${t('hero.success.complete')} ${label}`, 'success');
             
             console.log('Verification result:', result);
         } catch (err) {
             console.error('Verification error:', err);
-            const errorMessage = err.message || 'Failed to verify claim. Please try again.';
+            const errorMessage = err.message || t('hero.errors.verificationFailed');
             setError(errorMessage);
-            showToast('Verification failed. Please try again.', 'error');
+            showToast(t('hero.errors.verificationFailed'), 'error');
         } finally {
             setIsLoading(false);
+            setLoadingStage('');
         }
     };
 
-    /**
-     * Format untuk labeling
-     */
     const formatLabel = (label) => {
-    if (!label) return { text: t('labels.unknown'), color: 'bg-gray-600' };
-    
-    const normalized = String(label).toLowerCase();
-    const map = {
-        'valid': { text: t('labels.valid'), color: 'bg-blue-600' },
-        'hoax': { text: t('labels.hoax'), color: 'bg-red-600' },
-        'uncertain': { text: t('labels.uncertain'), color: 'bg-orange-600' },
-        'unverified': { text: t('labels.unverified'), color: 'bg-gray-600' }
+        if (!label) return { text: t('labels.unknown'), color: 'bg-gray-600' };
+        
+        const normalized = String(label).toLowerCase();
+        const map = {
+            'valid': { text: t('labels.valid'), color: 'bg-blue-600' },
+            'hoax': { text: t('labels.hoax'), color: 'bg-red-600' },
+            'uncertain': { text: t('labels.uncertain'), color: 'bg-orange-600' },
+            'unverified': { text: t('labels.unverified'), color: 'bg-gray-600' }
+        };
+        
+        return map[normalized] || { text: t('labels.unknown'), color: 'bg-gray-600' };
     };
-    
-    return map[normalized] || { text: t('labels.unknown'), color: 'bg-gray-600' };
-};
 
-    /**
-     * Format confidence score 
-     */
     const formatConfidence = (confidence) => {
+        if (confidence === null || confidence === undefined) return null;
         return Math.round(confidence * 100);
-    }
+    };
 
     return (
         <section className="flex flex-col items-center max-w-4xl mx-auto text-center px-4 sm:px-6 lg:px-8">
@@ -209,10 +243,10 @@ const Hero = () => {
                     disabled={isLoading}
                     className="w-full sm:w-auto bg-blue-500 hover:bg-blue-600 text-white px-6 md:px-8 py-3 rounded-full font-medium transition whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
-                    { isLoading ? (
+                    {isLoading ? (
                         <>
                             <Loader2 className="w-5 h-5 animate-spin" />
-                            <span>Verifying...</span>
+                            <span>{t('hero.verifying')}</span>
                         </>
                     ) : (
                         t('hero.verifyButton')
@@ -220,26 +254,48 @@ const Hero = () => {
                 </button>
             </form>
 
+            {/* 🆕 CACHE INFO BANNER */}
+            {cacheInfo && cacheInfo.isCached && (
+                <div className="w-full max-w-2xl mb-4 bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-sm text-blue-800">
+                        <AlertCircle className="w-4 h-4" />
+                        <span>{t('hero.success.cached', { 
+                            time: new Date(cacheInfo.timestamp).toLocaleString()
+                        })}</span>
+                    </div>
+                    <button
+                        onClick={handleForceRefresh}
+                        disabled={isLoading}
+                        className="flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium text-sm disabled:opacity-50"
+                    >
+                        <RefreshCw className="w-4 h-4" />
+                        Refresh
+                    </button>
+                </div>
+            )}
+
             {/* Error Message */}
             {error && (
                 <div className="w-full max-w-2xl mb-6 bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
                     <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
                     <div className="flex-1">
-                        <h4 className="font-semibold text-red-800 mb-1 text-sm sm:text-base">Error</h4>
+                        <h4 className="font-semibold text-red-800 mb-1 text-sm sm:text-base">{t('common.error')}</h4>
                         <p className="text-xs sm:text-sm text-red-600 break-words">{error}</p>
                     </div>
                 </div>
             )}
 
-            {/* Loading Skeleton */}
+            {/* Loading Skeleton with Stage Info */}
             {isLoading && (
                 <div className="w-full bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden">
                     <div className="h-2 bg-blue-500 w-full animate-pulse"></div>
                     <div className="p-4 sm:p-6 md:p-8 space-y-4">
                         <div className="text-center mb-4">
                             <Loader2 className="w-10 h-10 sm:w-12 sm:h-12 mx-auto text-blue-500 animate-spin mb-2" />
-                            <p className="text-gray-600 font-medium text-sm sm:text-base">Analyzing your claim...</p>
-                            <p className="text-xs sm:text-sm text-gray-500 mt-1">This may take 30-60 seconds</p>
+                            <p className="text-gray-600 font-medium text-sm sm:text-base">
+                                {loadingStage || t('hero.analyzing')}
+                            </p>
+                            <p className="text-xs sm:text-sm text-gray-500 mt-1">{t('hero.pleaseWait')}</p>
                         </div>
                         <div className="h-6 sm:h-8 bg-gray-200 rounded animate-pulse"></div>
                         <div className="h-20 sm:h-24 bg-gray-200 rounded animate-pulse"></div>
@@ -249,49 +305,42 @@ const Hero = () => {
             )}
 
             {/* Result Card */}
-            { !isLoading && verificationResult && (
+            {!isLoading && verificationResult && (
                 <div className="bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden text-left relative w-full">
-                    {/* Top Blue Bar */}
                     <div className="h-2 bg-blue-500 w-full"></div>
-
                     <div className="p-4 sm:p-6 md:p-8">
-                        {/* Badges */}
-                        {verificationResult.verification_result?.confidence !== null && 
-                        verificationResult.verification_result?.confidence !== undefined && 
-                        verificationResult.verification_result?.label !== 'unverified' && (
-                            <span className="bg-slate-600 text-white px-3 sm:px-4 py-1.5 rounded text-xs md:text-sm font-bold">
-                                {t('hero.confidence')}: {formatConfidence(verificationResult.verification_result?.confidence)}%
-                            </span>
-                        )}
                         {/* Label Badge */}
                         {verificationResult.verification_result?.label && (
-                            <span className={`${formatLabel(verificationResult.verification_result.label).color} text-white px-3 sm:px-4 py-1.5 rounded text-xs md:text-sm font-bold ml-2`}>
+                            <span className={`${formatLabel(verificationResult.verification_result.label).color} text-white px-3 sm:px-4 py-1.5 rounded text-xs md:text-sm font-bold`}>
                                 {formatLabel(verificationResult.verification_result.label).text}
                             </span>
                         )}
-                        {/* Confidence Badge (if confidence is not null/undefined) */}
+                        
+                        {/* Confidence Badge */}
                         {verificationResult.verification_result?.confidence !== null &&
-                         verificationResult.verification_result?.confidence !== undefined && (
+                         verificationResult.verification_result?.confidence !== undefined &&
+                         verificationResult.verification_result?.label !== 'unverified' && (
                             <span className="bg-blue-100 text-blue-700 px-3 sm:px-4 py-1.5 rounded text-xs md:text-sm font-bold ml-2">
                                 📊 {t('hero.confidence')}: {formatConfidence(verificationResult.verification_result.confidence)}%
                             </span>
                         )}
+                        
                         {/* Claim Text */}
-                        <div className="mb-4 p-3 sm:p-4 bg-blue-50 rounded-lg">
-                            <h3 className="font-bold text-sm sm:text-base text-slate-800 mb-2">Your Claim:</h3>
+                        <div className="mb-4 mt-4 p-3 sm:p-4 bg-blue-50 rounded-lg">
+                            <h3 className="font-bold text-sm sm:text-base text-slate-800 mb-2">{t('hero.yourClaim')}:</h3>
                             <p className="text-xs sm:text-sm text-slate-700 italic break-words">"{verificationResult.text}"</p>
                         </div>
 
-                        {/* Summary/Context Text */}
+                        {/* Summary */}
                         <div className="mb-6">
-                            <h4 className="font-bold text-sm sm:text-base text-slate-800 mb-2">Analysis Summary:</h4>
+                            <h4 className="font-bold text-sm sm:text-base text-slate-800 mb-2">{t('hero.analysisSummary')}:</h4>
                             <p className="text-slate-600 leading-relaxed text-xs sm:text-sm md:text-base text-justify break-words">
-                                {verificationResult.verification_result?.summary || 'No summary available.'}
+                                {verificationResult.verification_result?.summary || t('hero.noSummary')}
                             </p>
                         </div>
 
                         {/* References */}
-                        { verificationResult.sources && verificationResult.sources.length > 0 &&  (
+                        {verificationResult.sources && verificationResult.sources.length > 0 && (
                             <div className="mb-6">
                                 <h4 className="font-bold text-sm sm:text-base text-slate-800 mb-2">{t('hero.reference')}</h4>
                                 <ul className="text-xs sm:text-sm text-blue-500 space-y-2">
@@ -314,7 +363,7 @@ const Hero = () => {
                                                         {index + 1}. {title || doi}
                                                         {relevanceScore > 0 && (
                                                             <span className="text-gray-500 ml-2 text-xs">
-                                                                (Relevance: {Math.round(relevanceScore * 100)}%)
+                                                                ({t('hero.relevance')}: {Math.round(relevanceScore * 100)}%)
                                                             </span>
                                                         )}
                                                     </a>
@@ -329,7 +378,7 @@ const Hero = () => {
                                                     </a>
                                                 ) : (
                                                     <span className="text-gray-700">
-                                                        {index + 1}. {title || 'No Title Available'}
+                                                        {index + 1}. {title || t('hero.noTitle')}
                                                     </span>
                                                 )}
                                             </li>
@@ -343,9 +392,8 @@ const Hero = () => {
                         <div className="border-t border-gray-200 pt-4 mt-6">
                             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between text-xs text-gray-500 gap-2">
                                 <div className="flex items-center gap-2">
-                                    <span className="font-semibold text-blue-600">Verified by Healthify</span>
+                                    <span className="font-semibold text-blue-600">{t('hero.verifiedBy')}</span>
                                 </div>
-                                {/* <span>{new Date(verificationResult.created_at).toLocaleDateString('id-ID')}</span> */}
                             </div>
                         </div>
 
@@ -370,21 +418,21 @@ const Hero = () => {
                 </div>
             )}
 
-            {/* Placeholder Card - Menampilkan jika belum ada hasil */}
-            { !isLoading && !verificationResult &&  !error && (
+            {/* Placeholder */}
+            {!isLoading && !verificationResult && !error && (
                 <div className="bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden text-left relative w-full opacity-50">
                     <div className="h-2 bg-blue-500 w-full"></div>
                     <div className="p-4 sm:p-6 md:p-8">
                         <div className="text-center text-gray-500 py-8">
                             <Search className="w-12 h-12 sm:w-16 sm:h-16 mx-auto mb-4 text-gray-300"/>
-                            <p className="text-base sm:text-lg font-medium">Enter a claim to verify</p>
-                            <p className="text-xs sm:text-sm mt-2">Results will appear here after verification</p>
+                            <p className="text-base sm:text-lg font-medium">{t('hero.enterClaim')}</p>
+                            <p className="text-xs sm:text-sm mt-2">{t('hero.resultsWillAppear')}</p>
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* Toast Notification */}
+            {/* Toast */}
             {toast && (
                 <Toast 
                     message={toast.message}

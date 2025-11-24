@@ -202,44 +202,46 @@ class ClaimVerifyView(APIView):
     def post(self, request):
         """Process claim verification request."""
         logger.info(f"[VERIFY] Received request from {request.META.get('REMOTE_ADDR', 'unknown')}")
-        
+
         # Validate input
         serializer = ClaimCreateSerializer(data=request.data)
         if not serializer.is_valid():
             logger.warning(f"[VERIFY] Invalid request data: {serializer.errors}")
             return Response(
-                serializer.errors, 
+                serializer.errors,
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        claim_text = serializer.validated_data['text']
+
+        # Ambil text klaim segera setelah validasi agar tidak ada UnboundLocalError
+        claim_text = serializer.validated_data.get('text', '')  # defensive: default ke ''
+        # logging singkat dari klaim (maks 80 char) — aman karena claim_text sudah ada
         logger.info(f"[VERIFY] Processing claim: '{claim_text[:80]}...'")
-        
-        # Check exact match cache first
-        cached_response = self._get_cached_result(claim_text)
-        if cached_response:
-            return cached_response
-        
-        # Check for similar claims (semantic similarity)
-        similar_response = self._check_similar_claims(claim_text)
-        if similar_response:
-            return similar_response
-        
+
+        # flag force refresh - pastikan cast ke bool
+        force_refresh = bool(request.data.get('_force_refresh', False))
+
+        # Skip cache jika force refresh
+        if not force_refresh:
+            cached_response = self._get_cached_result(claim_text)
+            if cached_response:
+                return cached_response
+
         # Process new claim
         try:
             claim = self._create_new_claim(claim_text)
             verification = self._process_verification(claim)
-            
+
             # Update claim status to done
             claim.status = Claim.STATUS_DONE
             claim.save()
-            
+
             # Return response
             logger.info(f"[VERIFY] Successfully processed claim {claim.id}")
             response_data = ClaimDetailSerializer(claim).data
             return Response(response_data, status=status.HTTP_200_OK)
-            
+
         except Exception as e:
+            # Jika terjadi error di sini, pastikan kita punya claim_text untuk context (bisa kosong)
             logger.error(f"[VERIFY] Verification failed: {str(e)}", exc_info=True)
             return self._handle_verification_error(e, claim_text, request)
     
@@ -257,62 +259,25 @@ class ClaimVerifyView(APIView):
             Response or None: Response object if cached, None otherwise
         """
         is_cached, cache_claim, cached_verification = check_cached_result(claim_text)
-        
-        if is_cached and cache_claim and cached_verification:
-            # ✅ PENTING: Check apakah verification result sudah di-update
-            # Jika ada dispute yang di-approve, verification result mungkin sudah berubah
+
+        if is_cached:
+            # ✅ TAMBAHAN: Check fresh verification
+            fresh_verification = VerificationResult.objects.filter(
+                claim=cache_claim
+            ).latest('updated_at')
             
-            try:
-                # Get fresh verification result dari database
-                fresh_verification = VerificationResult.objects.filter(
-                    claim=cache_claim
-                ).latest('updated_at')  # Get most recent
-                
-                logger.info(f"[CACHE] Found claim {cache_claim.id}, checking for updates...")
-                
-                # Compare timestamps untuk detect kalau ada update
-                if fresh_verification.updated_at > cached_verification.updated_at:
-                    logger.info(
-                        f"[CACHE] Verification result was updated! "
-                        f"Old: {cached_verification.updated_at}, "
-                        f"New: {fresh_verification.updated_at}"
-                    )
-                    # Use fresh verification instead of cached
-                    cached_verification = fresh_verification
-                
-            except VerificationResult.DoesNotExist:
-                logger.warning(f"[CACHE] No verification found for claim {cache_claim.id}")
-                return None
-            except Exception as e:
-                logger.warning(f"[CACHE] Error checking fresh verification: {e}")
-                # Fall through to use cached version
+            # ✅ Compare timestamps
+            if fresh_verification.updated_at > cached_verification.updated_at:
+                logger.info("[CACHE] Verification was UPDATED!")
+                cached_verification = fresh_verification  # Use fresh!
             
-            # Build response dengan verification result (fresh atau cached)
-            try:
-                response_data = ClaimDetailSerializer({
-                    'claim': cache_claim,
-                    'verification_result': cached_verification
-                }).data
-                
-                logger.info(
-                    f"[CACHE HIT] Returning cached claim {cache_claim.id} "
-                    f"with {cached_verification.label} label"
-                )
-                
-                return Response(
-                    {
-                        **response_data,
-                        '_cache_status': 'hit',
-                        '_from_cache': True
-                    },
-                    status=status.HTTP_200_OK
-                )
-            except Exception as e:
-                logger.error(f"[CACHE] Error serializing cached result: {e}")
-                return None
-        
-        logger.info("[VERIFY] Cache MISS (exact) - Checking similarity...")
-        return None
+            # Serialize the claim for response
+            serializer = ClaimDetailSerializer(cache_claim)
+            return Response({
+                **serializer.data,
+                '_from_cache': True,
+                '_updated_at': fresh_verification.updated_at.isoformat()
+            })
     
     def _check_similar_claims(self, claim_text):
         """

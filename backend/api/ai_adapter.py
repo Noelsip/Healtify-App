@@ -5,6 +5,7 @@ import subprocess
 import hashlib
 import time
 import logging
+import re
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 
@@ -58,8 +59,9 @@ def normalize_claim_text(text: str) -> str:
 
 def is_health_related_claim(claim_text: str, summary: str = "") -> bool:
     """
-    Deteksi apakah klaim berkaitan dengan kesehatan.
-    Returns True jika health-related, False jika tidak.
+    🔧 FIXED: Deteksi health-related dengan support BILINGUAL dan threshold yang lebih baik.
+    
+    Returns True jika klaim berkaitan dengan kesehatan.
     """
     health_keywords_id = {
         'kesehatan', 'penyakit', 'obat', 'vitamin', 'diet', 'nutrisi',
@@ -76,30 +78,57 @@ def is_health_related_claim(claim_text: str, summary: str = "") -> bool:
         'cancer', 'diabetes', 'heart', 'blood', 'skin', 'face',
         'immune', 'infection', 'virus', 'bacteria', 'symptom', 'diagnosis',
         'vaccine', 'antibiotic', 'herbal', 'supplement', 'exercise',
-        'sleep', 'stress', 'mental', 'depression', 'anxiety'
+        'sleep', 'stress', 'mental', 'depression', 'anxiety',
+        # 🆕 TAMBAHAN untuk klaim medis umum
+        'study', 'research', 'clinical', 'trial', 'patient', 'cure',
+        'prevent', 'risk', 'effect', 'cause', 'benefit', 'harmful'
     }
+    
+    # 🆕 MEDICAL PATTERNS untuk deteksi lebih luas
+    medical_patterns = [
+        r'\b(steam|facial|skin)\s+(therapy|treatment|care)\b',  # "facial steaming"
+        r'\b(health|medical)\s+(benefit|effect|risk)\b',
+        r'\bcause[s]?\s+(cancer|disease|illness)\b',
+        r'\bprevent[s]?\s+(disease|infection)\b',
+        r'\btreat[s]?\s+(condition|symptom)\b',
+        r'\b(reduce|increase)[s]?\s+(risk|immunity)\b'
+    ]
     
     all_keywords = health_keywords_id | health_keywords_en
     
-    # Check claim text
+    # Normalize text
     text_lower = claim_text.lower()
     summary_lower = summary.lower() if summary else ""
     combined_text = text_lower + " " + summary_lower
     
-    # Count keyword matches
-    matches = sum(1 for keyword in all_keywords if keyword in combined_text)
+    # Method 1: Keyword matching
+    keyword_matches = sum(1 for keyword in all_keywords if keyword in combined_text)
     
-    # Threshold: at least 1 keyword match untuk dianggap health-related
-    return matches >= 1
+    # Method 2: Pattern matching
+    pattern_matches = sum(1 for pattern in medical_patterns if re.search(pattern, combined_text, re.I))
+    
+    # 🔧 FIXED: Lower threshold dan multiple detection methods
+    total_matches = keyword_matches + pattern_matches
+    
+    # Adaptive threshold berdasarkan panjang klaim
+    word_count = len(combined_text.split())
+    threshold = 1 if word_count < 10 else 2  # Lebih lenient untuk klaim pendek
+    
+    is_health = total_matches >= threshold
+    
+    logger.info(f"[HEALTH_CHECK] Keyword matches: {keyword_matches}, Pattern matches: {pattern_matches}")
+    logger.info(f"[HEALTH_CHECK] Total: {total_matches}, Threshold: {threshold}, Is Health: {is_health}")
+    
+    return is_health
 
 def determine_verification_label(confidence_score: float, has_sources: bool = True, 
                                 has_journal: bool = False, claim_text: str = "", 
                                 summary: str = "") -> str:
     """
-    Menentukan label verifikasi berdasarkan confidence dan sumber.
+    🔧 FIXED: Label determination dengan fallback mechanism yang lebih baik.
     
     Label Rules:
-    1. TIDAK TERVERIFIKASI: Jika bukan topik kesehatan atau tidak ada jurnal
+    1. TIDAK TERVERIFIKASI: Jika bukan topik kesehatan ATAU tidak ada jurnal
     2. FAKTA (valid): confidence >= 0.75 dan ada sumber jurnal
     3. HOAX: confidence <= 0.5 dan ada sumber jurnal
     4. TIDAK PASTI (uncertain): 0.5 < confidence < 0.75 dan ada sumber jurnal
@@ -114,8 +143,14 @@ def determine_verification_label(confidence_score: float, has_sources: bool = Tr
         c /= 100.0
     c = max(0.0, min(c, 1.0))
     
-    # Check if health-related
+    # Check if health-related (with improved detection)
     is_health = is_health_related_claim(claim_text, summary)
+    
+    # 🔧 FIXED: Fallback untuk English claims tanpa keyword match
+    if not is_health and has_sources and has_journal:
+        logger.warning(f"[LABEL] Claim might be health-related but keywords not detected")
+        logger.warning(f"        However, journal sources found - treating as health claim")
+        is_health = True  # Override jika ada journal sources
     
     # Rule 1: TIDAK TERVERIFIKASI jika bukan topik kesehatan
     if not is_health:
@@ -140,6 +175,7 @@ def determine_verification_label(confidence_score: float, has_sources: bool = Tr
     # Rule 5: TIDAK PASTI jika 0.5 < confidence < 0.75
     logger.info(f"[LABEL] Confidence {c:.2f} between 0.5-0.75 -> TIDAK PASTI")
     return 'uncertain'
+
 
 def map_ai_label_to_backend(ai_label: str) -> str:
     """
@@ -188,7 +224,7 @@ def map_ai_label_to_backend(ai_label: str) -> str:
 
 def normalize_ai_response(ai_result: Dict[str, Any], claim_text: str = "") -> Dict[str, Any]:
     """
-    Normalisasi response dari AI dengan label yang konsisten.
+    🔧 FIXED: Normalisasi response dengan logging lebih detail.
     """
     raw_label = ai_result.get('label', 'unverified')
     confidence_raw = ai_result.get('confidence', 0)
@@ -223,13 +259,16 @@ def normalize_ai_response(ai_result: Dict[str, Any], claim_text: str = "") -> Di
     else:
         combined_summary = original_summary or "Tidak ada sumber pendukung ditemukan."
     
-    # Detect journal presence (DOI atau source_type = journal)
+    # Detect journal presence
     has_journal = any(
         (s.get('doi') or '').strip() or s.get('source_type') == 'journal'
         for s in sources
     )
     
-    # Determine final label berdasarkan aturan yang BENAR
+    logger.info(f"[NORMALIZE] Raw label: {raw_label}, Confidence: {confidence:.2f}")
+    logger.info(f"[NORMALIZE] Has journal sources: {has_journal}, Total sources: {len(sources)}")
+    
+    # Determine final label dengan improved logic
     final_label = determine_verification_label(
         confidence_score=confidence,
         has_sources=bool(sources),
@@ -241,6 +280,8 @@ def normalize_ai_response(ai_result: Dict[str, Any], claim_text: str = "") -> Di
     # PENTING: Jika label adalah unverified, set confidence ke None
     final_confidence = confidence if final_label != 'unverified' else None
     
+    logger.info(f"[NORMALIZE] Final label: {final_label}, Final confidence: {final_confidence}")
+    
     return {
         'label': final_label,
         'confidence': final_confidence,
@@ -248,9 +289,14 @@ def normalize_ai_response(ai_result: Dict[str, Any], claim_text: str = "") -> Di
         'sources': sources,
         '_original_label': raw_label,
         '_processing_time': ai_result.get('_processing_time', 0),
-        '_method': ai_result.get('_method', 'unknown')
+        '_method': ai_result.get('_method', 'unknown'),
+        '_debug': {
+            'claim_text': claim_text[:100],
+            'has_journal': has_journal,
+            'source_count': len(sources)
+        }
     }
-
+    
 def extract_sources(result: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     Ekstrak sources dari result dictionary dengan normalisasi.

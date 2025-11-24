@@ -14,18 +14,22 @@ const handleResponse = async (response) => {
  *POST /api/verify 
  */
 
-export const verifyClaim = async (claimText) => {
-  try {
+export const verifyClaim = async (claimText, options = {}) => {
+    const body = { text: claimText };
+
+    if (options.force_refresh) {
+        body._force_refresh = true;
+        body._timestamp = Date.now();
+    }
+    try {
     console.log('API URL:', API_BASE_URL); // Debugging line
     const response = await fetch(`${API_BASE_URL}/verify/`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ text: claimText }),
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
     });
 
-    return await handleResponse(response);
+    return await response.json();
   } catch (error) {
     console.error('Error verifying claim:', error);
     throw error;

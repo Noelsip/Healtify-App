@@ -283,26 +283,26 @@ const AdminSources = () => {
 
                 {/* Sources Table */}
                 <div className="bg-white rounded-lg shadow overflow-hidden">
-                    <div className="overflow-x-auto">
-                        <table className="min-w-full divide-y divide-gray-200">
+                    <div className="w-full">
+                        <table className="w-full divide-y divide-gray-200 text-xs sm:text-sm">
                             <thead className="bg-gray-50">
                                 <tr>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    <th className="px-3 py-2 sm:px-4 md:px-6 text-left text-[10px] sm:text-xs font-medium text-gray-500 uppercase tracking-wider">
                                         ID
                                     </th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    <th className="px-3 py-2 sm:px-4 md:px-6 text-left text-[10px] sm:text-xs font-medium text-gray-500 uppercase tracking-wider">
                                         Title
                                     </th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    <th className="px-3 py-2 sm:px-4 md:px-6 text-left text-[10px] sm:text-xs font-medium text-gray-500 uppercase tracking-wider">
                                         URL
                                     </th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    <th className="px-3 py-2 sm:px-4 md:px-6 text-left text-[10px] sm:text-xs font-medium text-gray-500 uppercase tracking-wider">
                                         Type
                                     </th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    <th className="px-3 py-2 sm:px-4 md:px-6 text-left text-[10px] sm:text-xs font-medium text-gray-500 uppercase tracking-wider">
                                         Credibility
                                     </th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    <th className="px-3 py-2 sm:px-4 md:px-6 text-left text-[10px] sm:text-xs font-medium text-gray-500 uppercase tracking-wider">
                                         Actions
                                     </th>
                                 </tr>
@@ -310,34 +310,43 @@ const AdminSources = () => {
                             <tbody className="bg-white divide-y divide-gray-200">
                                 {sources.length === 0 ? (
                                     <tr>
-                                        <td colSpan="6" className="px-6 py-8 text-center text-gray-500">
+                                        <td colSpan="6" className="px-3 sm:px-4 md:px-6 py-6 text-center text-gray-500 text-xs sm:text-sm">
                                             No sources found
                                         </td>
                                     </tr>
                                 ) : (
                                     sources.map((source) => (
                                         <tr key={source.id} className="hover:bg-gray-50">
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                            <td className="px-3 py-2 sm:px-4 md:px-6 text-[11px] sm:text-sm text-gray-900">
                                                 #{source.id}
                                             </td>
-                                            <td className="px-6 py-4 text-sm text-gray-900">
-                                                <div className="max-w-xs truncate">{source.title}</div>
+                                            <td className="px-3 py-2 sm:px-4 md:px-6 text-[11px] sm:text-sm text-gray-900">
+                                                <div className="max-w-[140px] sm:max-w-xs break-words">
+                                                    {source.title}
+                                                </div>
                                             </td>
-                                            <td className="px-6 py-4 text-sm text-blue-600">
-                                                <a href={source.url} target="_blank" rel="noopener noreferrer" className="hover:underline">
-                                                    <div className="max-w-xs truncate">{source.url}</div>
+                                            <td className="px-3 py-2 sm:px-4 md:px-6 text-[11px] sm:text-sm text-blue-600">
+                                                <a
+                                                    href={source.url}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="hover:underline"
+                                                >
+                                                    <div className="max-w-[160px] sm:max-w-xs break-words">
+                                                        {source.url}
+                                                    </div>
                                                 </a>
                                             </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                                <span className="px-2 py-1 bg-gray-100 rounded text-xs">
+                                            <td className="px-3 py-2 sm:px-4 md:px-6 text-[11px] sm:text-sm text-gray-900">
+                                                <span className="px-2 py-1 bg-gray-100 rounded text-[10px] sm:text-xs">
                                                     {source.source_type}
                                                 </span>
                                             </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                            <td className="px-3 py-2 sm:px-4 md:px-6 text-[11px] sm:text-sm">
                                                 <div className="flex items-center">
-                                                    <div className="w-16 bg-gray-200 rounded-full h-2 mr-2">
-                                                        <div 
-                                                            className="bg-green-500 h-2 rounded-full" 
+                                                    <div className="w-12 sm:w-16 bg-gray-200 rounded-full h-2 mr-2">
+                                                        <div
+                                                            className="bg-green-500 h-2 rounded-full"
                                                             style={{ width: `${source.credibility_score * 100}%` }}
                                                         ></div>
                                                     </div>
@@ -346,7 +355,7 @@ const AdminSources = () => {
                                                     </span>
                                                 </div>
                                             </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm space-x-2">
+                                            <td className="px-3 py-2 sm:px-4 md:px-6 text-[11px] sm:text-sm space-x-2">
                                                 <button
                                                     onClick={() => openEditModal(source)}
                                                     className="text-blue-600 hover:text-blue-900 font-medium"

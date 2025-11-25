@@ -227,19 +227,22 @@ const Hero = () => {
             </p>
 
             {/* Search Box */}
-            <form onSubmit={handleSearch} className="w-full max-w-2xl bg-white p-2 rounded-full shadow-xl flex flex-col sm:flex-row items-center gap-2 sm:gap-0 mb-12 border border-slate-200">
+            <form
+                onSubmit={handleSearch}
+                className="w-full max-w-2xl bg-white px-4 py-4 md:p-2 rounded-2xl md:rounded-full shadow-xl flex flex-col md:flex-row items-stretch md:items-center gap-4 md:gap-0 mb-10 md:mb-12 border border-slate-200"
+            >
                 <input 
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder={t('hero.searchPlaceholder')}
-                    className="flex-1 w-full sm:w-auto px-4 sm:px-6 py-3 outline-none text-sm sm:text-base text-slate-700 placeholder:text-slate-400 bg-transparent"
+                    className="w-full md:flex-1 md:w-auto px-4 md:px-6 py-3 md:py-2 outline-none text-sm md:text-base text-slate-700 placeholder:text-slate-400 bg-slate-50 md:bg-transparent rounded-full md:rounded-full border border-slate-200 md:border-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition"
                     disabled={isLoading}
                 />
                 <button 
                     type="submit"
                     disabled={isLoading}
-                    className="w-full sm:w-auto bg-blue-500 hover:bg-blue-600 text-white px-6 md:px-8 py-3 rounded-full font-medium transition whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    className="w-full md:w-auto bg-blue-500 hover:bg-blue-600 text-white px-6 md:px-8 py-3 md:py-2 rounded-full font-medium transition whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-md md:shadow-none mt-1 md:mt-0"
                 >
                     {isLoading ? (
                         <>

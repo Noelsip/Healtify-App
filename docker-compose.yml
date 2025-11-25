@@ -35,22 +35,22 @@ services:
     restart: unless-stopped
 
   nginx:
-  image: nginx:alpine
-  container_name: healtify_nginx
-  ports:
-    - "80:80"
-    - "443:443"
-  volumes:
-    - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-    - ./nginx/ssl:/etc/nginx/ssl:ro
-    - ./frontend/dist:/app/frontend/dist:ro  
-    - static_volume:/app/backend/staticfiles:ro
-    - media_volume:/app/backend/media:ro
-  depends_on:
-    - backend
-  networks:
-    - healtify_network
-  restart: unless-stopped
+    image: nginx:alpine
+    container_name: healtify_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./frontend/dist:/app/frontend/dist:ro  
+      - static_volume:/app/backend/staticfiles:ro
+      - media_volume:/app/backend/media:ro
+    depends_on:
+      - backend
+    networks:
+      - healtify_network
+    restart: unless-stopped
 
 volumes:
   postgres_data:

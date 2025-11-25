@@ -15,6 +15,7 @@ const Navbar = () => {
     setCurrentLang(newLang);
   };
 
+  // Python-mudah1
   const toggleMenu = () => {
     setIsMenuOpen(!isMenuOpen);
   };

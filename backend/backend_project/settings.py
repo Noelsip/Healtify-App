@@ -145,7 +145,7 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 # mode dev bukan mode prod
-CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_CREDENTIALS = False
 
 CORS_ALLOW_METHODS = [
     'GET',

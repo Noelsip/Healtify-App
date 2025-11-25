@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation } from 'react-router-dom';
-import Logo from '../assets/logo.png';
+
 
 const Navbar = () => {
   const { t, i18n } = useTranslation();
@@ -29,7 +29,7 @@ const Navbar = () => {
           to="/"
           className="flex items-center space-x-3 hover:opacity-80 transition-opacity"
         >
-          <img src={Logo} alt="Healthify Logo" className="h-10 w-10" />
+          <img src='/logo.png' alt="Healthify Logo" className="h-10 w-10" />
           <h1 className="text-2xl sm:text-3xl lg:text-4xl text-gray-800 font-poppins font-bold">Healthify</h1>
         </Link>
 

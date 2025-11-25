@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import githubIcon from '../assets/github.png';
 import gmailIcon from '../assets/gmail.png';
 import linkedinIcon from '../assets/linkedin.png';
-import logoHealthify from '../assets/logo.png';
 
 const Footer = () => {
     const { t } = useTranslation();
@@ -47,7 +46,7 @@ const Footer = () => {
                     <div className="flex flex-col gap-4 w-full md:w-1/3">
                         <div className="flex items-center gap-3">
                             <img 
-                                src={logoHealthify} 
+                                src='/logo.png'
                                 alt="Healthify Logo" 
                                 className="h-16 md:h-20 w-16 md:w-20 object-contain"
                             />

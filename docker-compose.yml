@@ -43,6 +43,7 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/ssl:/etc/nginx/ssl:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro 
       - ./frontend/dist:/app/frontend/dist:ro  
       - static_volume:/app/backend/staticfiles:ro
       - media_volume:/app/backend/media:ro

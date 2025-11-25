@@ -2,7 +2,7 @@ import { AlertCircle, ArrowLeft, Filter as FilterIcon, LogOut, Scale, Search } f
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://api.healthify.cloud/api';
 
 const AdminDisputes = () => {
     const navigate = useNavigate();

@@ -1,6 +1,7 @@
 # djanggo library
 Django>=4.2,<5.0
 djangorestframework
+djangorestframework-simplejwt
 django-cors-headers
 django-environ
 
@@ -15,5 +16,9 @@ gunicorn
 python-dotenv
 requests
 httpx
+python-decouple
+sendgrid
 
-python-decouple sendgrid
+# AI Integration
+google-genai
+langchain-google-genai

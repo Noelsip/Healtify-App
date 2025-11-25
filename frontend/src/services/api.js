@@ -29,7 +29,7 @@ export const verifyClaim = async (claimText, options = {}) => {
         body: JSON.stringify(body)
     });
 
-    return await response.json();
+    return await handleResponse(response);
   } catch (error) {
     console.error('Error verifying claim:', error);
     throw error;

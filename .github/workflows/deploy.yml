@@ -2,8 +2,8 @@ name: Deploy to VPS
 
 on:
   push:
-    branches: [ main ]  # atau master, sesuaikan dengan branch Anda
-  workflow_dispatch:  # Manual trigger
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   deploy-backend:
@@ -21,9 +21,27 @@ jobs:
         key: ${{ secrets.VPS_SSH_KEY }}
         port: ${{ secrets.VPS_PORT }}
         script: |
-          cd /home/${{ secrets.VPS_USERNAME }}/healtify-app
+          cd ~/Healtify-App
+          echo "🔄 Pulling latest code..."
           git pull origin main
+          
+          echo "🛑 Stopping containers..."
           docker-compose down
-          docker-compose up -d --build
+          
+          echo "🔨 Building new images..."
+          docker-compose build --no-cache
+          
+          echo "🚀 Starting containers..."
+          docker-compose up -d
+          
+          echo "⏳ Waiting for backend to be ready..."
+          sleep 10
+          
+          echo "📊 Running migrations..."
           docker-compose exec -T backend python manage.py migrate
+          
+          echo "📦 Collecting static files..."
           docker-compose exec -T backend python manage.py collectstatic --noinput
+          
+          echo "✅ Deployment complete!"
+          docker-compose ps

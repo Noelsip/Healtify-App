@@ -677,16 +677,9 @@ def build_evidence_text(neighbors: List[Dict], max_chars: int = 2000) -> str:
         title = nb.get("title", "Unknown")[:100]
         relevance = nb.get("relevance_score", 0)
         
-        # Build entry
+        # Build entry tanpa menambahkan potongan teks jurnal
+        # Hanya sertakan judul singkat dan skor relevansi agar LLM menyimpulkan sendiri
         entry = f"{i}. {title} (relevance: {relevance:.1%})"
-        
-        # Add snippet if available
-        snippet = nb.get("excerpt", nb.get("text", ""))
-        if snippet:
-            snippet = snippet[:300].strip()
-            if len(snippet) > 100:
-                snippet = snippet[:100] + "..."
-            entry += f"\n   Excerpt: \"{snippet}\""
         
         # Check if we have space
         if total + len(entry) <= max_chars:

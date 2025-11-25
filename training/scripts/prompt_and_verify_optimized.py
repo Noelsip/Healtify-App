@@ -648,12 +648,14 @@ INSTRUKSI:
 3. Pertimbangkan mekanisme biologis yang mendasari klaim
 4. Jika ada konflik dalam bukti, jelaskan nuansanya
 5. Berikan confidence score 0.0-1.0 yang realistis
-
+6. Fokuskan analisis hanya pada klaim di atas. 
+   Jangan mengalihkan pembahasan ke topik lain (misalnya kehamilan) jika tidak secara langsung menjawab klaim tersebut.
+7. Jika bukti tidak spesifik untuk klaim (misalnya hanya membahas risiko kehamilan), jelaskan bahwa bukti TIDAK LANGSUNG mendukung klaim dan simpulkan secara jujur (uncertain/unverified).
 OUTPUT FORMAT (JSON ONLY):
 {{
     "label": "VALID atau HOAX atau UNCERTAIN",
     "confidence": 0.0-1.0,
-    "summary": "Penjelasan singkat (2-3 kalimat) tentang verifikasi klaim"
+    "summary": "Ringkasan singkat (2-3 kalimat) yang secara langsung menjawab klaim di atas, jelaskan apakah klaim benar/salah/tidak pasti dan SEBUTKAN kalau bukti hanya terkait topik lain."
 }}
 
 CATATAN:

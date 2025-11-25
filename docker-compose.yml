@@ -26,6 +26,7 @@ services:
       - DB_PORT=5432
     volumes:
       - ./backend:/app/backend
+      - ./training/.env:/app/training/.env:ro 
       - static_volume:/app/backend/staticfiles
       - media_volume:/app/backend/media
     depends_on:

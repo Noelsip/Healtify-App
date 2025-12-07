@@ -37,6 +37,30 @@ if not CHUNKS_DIR.exists():
 
 print(f"Using chunks directory: {CHUNKS_DIR}")
 
+# Tracking file for processed chunks
+PROCESSED_FILES_TRACKER = CHUNKS_DIR / ".processed_files.json"
+
+
+def load_processed_files() -> set:
+    """Load set of already processed file names."""
+    if PROCESSED_FILES_TRACKER.exists():
+        try:
+            data = json.loads(PROCESSED_FILES_TRACKER.read_text(encoding="utf-8"))
+            return set(data.get("processed", []))
+        except:
+            pass
+    return set()
+
+
+def save_processed_file(filename: str):
+    """Add a file to the processed tracker."""
+    processed = load_processed_files()
+    processed.add(filename)
+    PROCESSED_FILES_TRACKER.write_text(
+        json.dumps({"processed": list(processed)}, indent=2),
+        encoding="utf-8"
+    )
+
 # Configuration constants
 VECTOR_DIM_ENV = os.getenv("VECTOR_DIM")
 VECTOR_DIM = int(VECTOR_DIM_ENV) if VECTOR_DIM_ENV else None
@@ -204,19 +228,31 @@ def process_file(file_path: Path, cursor, vector_dim: int) -> int:
     return total_inserted
 
 
-def ingest():
-    """Fungsi utama untuk ingest chunks ke PostgreSQL database."""
+def ingest(force_all: bool = False):
+    """Fungsi utama untuk ingest chunks ke PostgreSQL database.
+    
+    Args:
+        force_all: Jika True, proses semua file. Jika False, skip yang sudah diproses.
+    """
     # Validasi direktori dan file
     if not CHUNKS_DIR.exists() or not CHUNKS_DIR.is_dir():
         logger.error(f"Direktori chunks tidak ditemukan: {CHUNKS_DIR}")
         sys.exit(1)
 
-    jsonl_files = sorted(list(CHUNKS_DIR.glob("*.jsonl")))
-    if not jsonl_files:
+    all_jsonl_files = sorted(list(CHUNKS_DIR.glob("*.jsonl")))
+    if not all_jsonl_files:
         logger.error(f"Tidak ada file .jsonl ditemukan di {CHUNKS_DIR}")
         sys.exit(1)
 
-    logger.info(f"Ditemukan {len(jsonl_files)} file .jsonl di {CHUNKS_DIR}")
+    # Filter hanya file yang belum diproses
+    processed_files = load_processed_files() if not force_all else set()
+    jsonl_files = [f for f in all_jsonl_files if f.name not in processed_files]
+    
+    if not jsonl_files:
+        logger.info(f"Semua {len(all_jsonl_files)} file sudah diproses sebelumnya. Tidak ada yang baru.")
+        return 0
+    
+    logger.info(f"Ditemukan {len(jsonl_files)} file BARU dari total {len(all_jsonl_files)} file .jsonl")
 
     # Tentukan dimensi vektor
     vector_dim = _determine_vector_dimension(jsonl_files)
@@ -237,6 +273,8 @@ def ingest():
                 inserted_count = process_file(file_path, cursor, vector_dim)
                 connection.commit()
                 total_inserted += inserted_count
+                # Mark file as processed
+                save_processed_file(file_path.name)
 
     except KeyboardInterrupt:
         logger.warning("Proses dihentikan oleh user. Data yang sudah diproses tetap tersimpan.")
@@ -246,6 +284,7 @@ def ingest():
         connection.close()
 
     logger.info(f"Proses selesai. Total records inserted: {total_inserted}")
+    return total_inserted
 
 
 def _determine_vector_dimension(files: list) -> int:

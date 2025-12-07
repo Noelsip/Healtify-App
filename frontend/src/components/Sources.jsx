@@ -5,6 +5,10 @@ import ncbiLogo from '../assets/ncbi.png';
 import crossrefLogo from '../assets/crossref.png';
 import semanticLogo from '../assets/semantic.png';
 import elsevierLogo from '../assets/elsevier.png';
+import openalexLogo from '../assets/openalex.png';
+import europepmcLogo from '../assets/europepmc.png';
+import doajLogo from '../assets/doaj2.png';
+import arxivLogo from '../assets/Arxiv.png';
 
 const Sources = () => {
     const { t } = useTranslation();
@@ -14,7 +18,11 @@ const Sources = () => {
         { logo: ncbiLogo },
         { logo: crossrefLogo },
         { logo: semanticLogo },
-        { logo: elsevierLogo }
+        { logo: elsevierLogo },
+        { logo: openalexLogo},
+        { logo: europepmcLogo},
+        { logo: doajLogo},
+        { logo: arxivLogo}
     ];
 
     return (

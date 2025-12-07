@@ -10,6 +10,7 @@ from django.db.models import Count
 from django.db import transaction
 from django.utils import timezone
 from django.http import Http404
+from django.conf import settings
 
 # IMPORT MODELS 
 from .models import Claim, Source, Dispute, VerificationResult, ClaimSource
@@ -19,8 +20,105 @@ from .email_service import email_service
 from .ai_adapter import call_ai_verify, normalize_ai_response
 
 import logging
+import requests
 
 logger = logging.getLogger(__name__)
+
+
+def fetch_evidence_from_doi(doi: str) -> Dict[str, Any]:
+    """
+    Fetch metadata dan abstract dari DOI menggunakan CrossRef API.
+    """
+    if not doi:
+        return {}
+    
+    # Clean DOI
+    doi = doi.strip()
+    if doi.startswith('https://doi.org/'):
+        doi = doi.replace('https://doi.org/', '')
+    elif doi.startswith('http://doi.org/'):
+        doi = doi.replace('http://doi.org/', '')
+    
+    try:
+        # CrossRef API
+        url = f"https://api.crossref.org/works/{doi}"
+        headers = {'User-Agent': 'Healthify/1.0 (mailto:admin@healthify.cloud)'}
+        
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            work = data.get('message', {})
+            
+            # Extract title
+            title_list = work.get('title', [])
+            title = title_list[0] if title_list else 'Unknown Title'
+            
+            # Extract abstract
+            abstract = work.get('abstract', '')
+            if abstract:
+                # Clean HTML tags dari abstract
+                import re
+                abstract = re.sub(r'<[^>]+>', '', abstract)
+            
+            # Extract authors
+            authors = []
+            for author in work.get('author', [])[:5]:
+                name = f"{author.get('given', '')} {author.get('family', '')}".strip()
+                if name:
+                    authors.append(name)
+            
+            logger.info(f"[FETCH_DOI] Successfully fetched: {title[:50]}...")
+            
+            return {
+                'doi': doi,
+                'title': title,
+                'abstract': abstract,
+                'authors': ', '.join(authors),
+                'publisher': work.get('publisher', ''),
+                'url': f"https://doi.org/{doi}"
+            }
+        else:
+            logger.warning(f"[FETCH_DOI] CrossRef returned {response.status_code} for DOI: {doi}")
+            
+    except Exception as e:
+        logger.error(f"[FETCH_DOI] Error fetching DOI {doi}: {e}")
+    
+    return {'doi': doi, 'url': f"https://doi.org/{doi}"}
+
+
+def fetch_evidence_from_url(url: str) -> Dict[str, Any]:
+    """
+    Fetch content dari URL (basic scraping untuk title).
+    """
+    if not url:
+        return {}
+    
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (compatible; Healthify/1.0)'}
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            # Basic title extraction
+            import re
+            title_match = re.search(r'<title[^>]*>([^<]+)</title>', response.text, re.IGNORECASE)
+            title = title_match.group(1).strip() if title_match else url
+            
+            # Try to find meta description
+            desc_match = re.search(r'<meta[^>]*name=["\']description["\'][^>]*content=["\']([^"\']+)["\']', response.text, re.IGNORECASE)
+            description = desc_match.group(1).strip() if desc_match else ''
+            
+            return {
+                'url': url,
+                'title': title[:200],
+                'abstract': description[:1000] if description else f"Content from: {url}"
+            }
+            
+    except Exception as e:
+        logger.error(f"[FETCH_URL] Error fetching URL {url}: {e}")
+    
+    return {'url': url, 'title': url}
+
 
 class AdminDashboardStatsView(APIView):
     """
@@ -456,13 +554,27 @@ class AdminDisputeDetailView(APIView):
                 final_confidence = new_confidence
                 final_summary = new_summary
             
-            # ====== RE-VERIFY WITH AI ======
+            # ====== RE-VERIFY WITH AI + USER EVIDENCE ======
             elif re_verify:
-                logger.info(f"[APPROVE] Re-verifying claim with AI...")
+                logger.info(f"[APPROVE] Re-verifying claim with AI and user evidence...")
                 
                 try:
-                    # Call AI dengan claim text terbaru
-                    ai_result = call_ai_verify(dispute.claim.text)
+                    # ====== FETCH EVIDENCE FROM USER'S DOI/URL ======
+                    additional_evidence = None
+                    
+                    if dispute.supporting_doi:
+                        logger.info(f"[APPROVE] Fetching evidence from DOI: {dispute.supporting_doi}")
+                        additional_evidence = fetch_evidence_from_doi(dispute.supporting_doi)
+                        
+                    elif dispute.supporting_url:
+                        logger.info(f"[APPROVE] Fetching evidence from URL: {dispute.supporting_url}")
+                        additional_evidence = fetch_evidence_from_url(dispute.supporting_url)
+                    
+                    if additional_evidence:
+                        logger.info(f"[APPROVE] Evidence fetched: {additional_evidence.get('title', 'N/A')[:50]}")
+                    
+                    # ====== CALL AI WITH EVIDENCE ======
+                    ai_result = call_ai_verify(dispute.claim.text, additional_evidence=additional_evidence)
                     normalized = normalize_ai_response(ai_result, claim_text=dispute.claim.text)
                     
                     logger.info(f"[APPROVE] AI re-verify result: {normalized['label']}")
@@ -471,16 +583,26 @@ class AdminDisputeDetailView(APIView):
                     verification.label = normalized['label']
                     verification.confidence = normalized['confidence']
                     verification.summary = normalized['summary']
-                    verification.reviewer_notes = f"Admin approved dispute #{dispute.id} with re-verification\n{review_note}"
+                    
+                    # Add note about evidence used
+                    evidence_note = ""
+                    if additional_evidence and additional_evidence.get('title'):
+                        evidence_note = f"\n📎 Evidence used: {additional_evidence.get('title', 'N/A')[:100]}"
+                    
+                    verification.reviewer_notes = f"Admin approved dispute #{dispute.id} with re-verification{evidence_note}\n{review_note}"
                     verification.save()
                     
                     # Update sources jika ada
                     if normalized['sources']:
                         self._update_claim_sources(dispute.claim, normalized['sources'])
                     
-                    logger.info(f"[APPROVE] VerificationResult {verification.id} updated with AI re-verify")
+                    # Jika ada evidence dari user, tambahkan juga sebagai Source
+                    if additional_evidence and additional_evidence.get('doi'):
+                        self._add_user_evidence_as_source(dispute.claim, additional_evidence)
                     
-                    updated_via = "ai_reverify"
+                    logger.info(f"[APPROVE] VerificationResult {verification.id} updated with AI re-verify + user evidence")
+                    
+                    updated_via = "ai_reverify_with_evidence" if additional_evidence else "ai_reverify"
                     final_label = normalized['label']
                     final_confidence = normalized['confidence']
                     final_summary = normalized['summary']
@@ -623,6 +745,59 @@ class AdminDisputeDetailView(APIView):
         
         except Exception as e:
             logger.error(f"[SOURCES] Error updating sources: {str(e)}")
+
+    def _add_user_evidence_as_source(self, claim: Claim, evidence: Dict[str, Any]):
+        """
+        Tambahkan evidence dari user dispute sebagai Source baru.
+        Evidence ini akan ditandai dengan credibility score tinggi karena dari user.
+        """
+        try:
+            doi = (evidence.get('doi') or '').strip()
+            url = (evidence.get('url') or '').strip()
+            
+            if not doi and not url:
+                logger.warning("[USER_EVIDENCE] No DOI or URL in evidence, skipping")
+                return
+            
+            # Check if source already exists
+            existing = None
+            if doi:
+                existing = Source.objects.filter(doi=doi).first()
+            elif url:
+                existing = Source.objects.filter(url=url).first()
+            
+            if existing:
+                logger.info(f"[USER_EVIDENCE] Source already exists: {existing.id}")
+                source = existing
+            else:
+                # Create new source
+                source = Source.objects.create(
+                    title=evidence.get('title', 'User Submitted Evidence')[:500],
+                    doi=doi if doi else None,
+                    url=url if url else None,
+                    authors=evidence.get('authors', ''),
+                    publisher=evidence.get('publisher', ''),
+                    source_type='journal',
+                    credibility_score=0.85  # High credibility untuk user-submitted
+                )
+                logger.info(f"[USER_EVIDENCE] Created new source: {source.id}")
+            
+            # Link to claim with high relevance
+            ClaimSource.objects.get_or_create(
+                claim=claim,
+                source=source,
+                defaults={
+                    'relevance_score': 0.95,
+                    'excerpt': evidence.get('abstract', '')[:500],
+                    'rank': 0  # Top rank
+                }
+            )
+            
+            logger.info(f"[USER_EVIDENCE] Linked source {source.id} to claim {claim.id}")
+            
+        except Exception as e:
+            logger.error(f"[USER_EVIDENCE] Error adding user evidence: {str(e)}")
+
             
 class AdminSourceListView(APIView):
     """

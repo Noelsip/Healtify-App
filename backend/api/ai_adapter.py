@@ -319,7 +319,7 @@ def load_training_env() -> Dict[str, str]:
             from dotenv import dotenv_values
             env_vars = dotenv_values(dotenv_path)
             
-            critical_keys = ["GEMINI_API_KEY", "DB_HOST", "DB_PORT", "DB_NAME", "DB_USER"]
+            critical_keys = ["DEEPSEEK_API_KEY", "GEMINI_API_KEY", "DB_HOST", "DB_PORT", "DB_NAME", "DB_USER"]
             missing_keys = [k for k in critical_keys if not env_vars.get(k)]
             
             if missing_keys:
@@ -398,16 +398,11 @@ def get_optimized_module():
             sys.path.insert(0, str(TRAINING_SCRIPTS_DIR))
         
         try:
-            import prompt_and_verify_optimized as pvo
-            _optimized_module = pvo
-            logger.info("✅ Loaded optimized module")
-        except ImportError:
-            try:
-                import prompt_and_verify as pv
-                _optimized_module = pv
-                logger.warning("⚠️ Using original module (slower)")
-            except ImportError as e:
-                raise ImportError(f"Cannot import verification module: {e}")
+            import prompt_and_verify as pv
+            _optimized_module = pv
+            logger.info("✅ Loaded verification module (DeepSeek)")
+        except ImportError as e:
+            raise ImportError(f"Cannot import verification module: {e}")
     
     return _optimized_module
 
@@ -420,28 +415,56 @@ def call_ai_verify_direct_optimized(claim_text: str) -> Dict[str, Any]:
         
         pvo = get_optimized_module()
         
-        if hasattr(pvo, 'verify_claim_v2'):
-            raw_result = pvo.verify_claim_v2(
+        # Use verify_claim_local (main verification function)
+        if hasattr(pvo, 'verify_claim_local'):
+            raw_result = pvo.verify_claim_local(
                 claim=claim_text,
                 k=10,
-                enable_fetch=True,  # ✅ ENABLE fetch untuk lebih banyak sources
-                debug=False
+                dry_run=False,
+                enable_expansion=True,
+                min_relevance=0.25,
+                force_dynamic_fetch=False,
+                debug_retrieval=False
             )
         else:
-            raise AttributeError("verify_claim_v2 not found")
+            raise AttributeError("verify_claim_local not found in module")
         
         elapsed = time.time() - start_time
         
         logger.info(f"✅ Verification completed in {elapsed:.1f}s")
         
+        # Extract from _frontend_payload if present (new format)
+        if "_frontend_payload" in raw_result:
+            payload = raw_result["_frontend_payload"]
+            logger.debug(f"[PARSE] Extracted from _frontend_payload: label={payload.get('label')}")
+        else:
+            payload = raw_result
+        
+        # Get label and map it
+        raw_label = payload.get("label", "unverified")
+        mapped_label = map_ai_label_to_backend(raw_label)
+        
+        # Get confidence
+        raw_confidence = payload.get("confidence")
+        confidence = float(raw_confidence) if raw_confidence is not None else 0.0
+        
+        # Get summary
+        summary = payload.get("summary", "") or payload.get("conclusion", "") or ""
+        
+        # Get sources from evidence or references
+        sources = extract_sources(payload)
+        
+        logger.info(f"[PARSE] Label: {raw_label} -> {mapped_label}, Confidence: {confidence}, Sources: {len(sources)}")
+        
         return {
-            "label": map_ai_label_to_backend(raw_result.get("label", "unverified")),
-            "summary": raw_result.get("summary", ""),
-            "confidence": float(raw_result.get("confidence") or 0.0),
-            "sources": extract_sources(raw_result),
+            "label": mapped_label,
+            "summary": summary,
+            "confidence": confidence,
+            "sources": sources,
             "_processing_time": elapsed,
             "_method": "direct_optimized",
-            "_claim_text": claim_text
+            "_claim_text": claim_text,
+            "_raw_label": raw_label
         }
         
     except Exception as e:
@@ -462,14 +485,20 @@ def call_ai_verify_subprocess(claim_text: str) -> Dict[str, Any]:
     Subprocess fallback method - fallback implementation.
     """
     raise NotImplementedError("Subprocess method not fully implemented - use direct method")
-
-# ===========================
 # Public API
 # ===========================
 
-def call_ai_verify(claim_text: str) -> Dict[str, Any]:
+def call_ai_verify(claim_text: str, additional_evidence: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
-    ✅ MAIN ENTRY POINT dengan improved logic.
+    MAIN ENTRY POINT dengan improved logic.
+    
+    Args:
+        claim_text: Teks klaim yang akan diverifikasi
+        additional_evidence: Optional dict berisi evidence tambahan dari user dispute:
+            - doi: DOI jurnal dari user
+            - url: URL sumber dari user  
+            - abstract: Abstract/konten yang sudah di-fetch
+            - title: Judul jurnal
     """
     if not claim_text or not claim_text.strip():
         raise ValueError("Claim text cannot be empty")
@@ -477,15 +506,22 @@ def call_ai_verify(claim_text: str) -> Dict[str, Any]:
     claim_text = claim_text.strip()
     
     logger.info("="*80)
-    logger.info(f"📥 NEW VERIFICATION REQUEST")
+    logger.info(f" NEW VERIFICATION REQUEST")
     logger.info(f"   Claim: {claim_text[:100]}")
+    if additional_evidence:
+        logger.info(f"   Additional Evidence: DOI={additional_evidence.get('doi', 'N/A')}")
     logger.info("="*80)
     
     try:
-        result = call_ai_verify_direct_optimized(claim_text)
+        # Jika ada additional evidence, include dalam verification
+        if additional_evidence and additional_evidence.get('abstract'):
+            result = call_ai_verify_with_evidence(claim_text, additional_evidence)
+        else:
+            result = call_ai_verify_direct_optimized(claim_text)
+            
         normalized = normalize_ai_response(result, claim_text=claim_text)
         
-        logger.info(f"✅ Final Result:")
+        logger.info(f" Final Result:")
         logger.info(f"   Label: {normalized['label']}")
         logger.info(f"   Confidence: {normalized.get('confidence', 'N/A')}")
         logger.info(f"   Sources: {len(normalized.get('sources', []))}")
@@ -493,7 +529,7 @@ def call_ai_verify(claim_text: str) -> Dict[str, Any]:
         return normalized
         
     except Exception as e:
-        logger.error(f"❌ Verification failed: {e}")
+        logger.error(f" Verification failed: {e}")
         
         return {
             "label": "unverified",
@@ -503,12 +539,70 @@ def call_ai_verify(claim_text: str) -> Dict[str, Any]:
             "_error": True,
             "_error_message": str(e)
         }
+
+
+def call_ai_verify_with_evidence(claim_text: str, evidence: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Verifikasi klaim dengan evidence tambahan dari user dispute.
+    Evidence akan di-inject ke dalam prompt sebagai bukti prioritas.
+    """
+    start_time = time.time()
+    
+    try:
+        module = get_optimized_module()
+        if module is None:
+            raise ImportError("Could not import verification module")
         
-# Module initialization
-logger.info("="*80)
-logger.info("AI Adapter Initialized")
-logger.info(f"  Script: {VERIFY_SCRIPT.name}")
-logger.info(f"  Path: {VERIFY_SCRIPT}")
+        # Build custom evidence context
+        evidence_context = f"""
+=== BUKTI TAMBAHAN DARI USER ===
+Judul: {evidence.get('title', 'N/A')}
+DOI: {evidence.get('doi', 'N/A')}
+URL: {evidence.get('url', 'N/A')}
+
+Abstrak/Konten:
+{evidence.get('abstract', 'Tidak tersedia')}
+================================
+"""
+        
+        # Gabungkan claim dengan evidence untuk verification
+        enhanced_claim = f"{claim_text}\n\n[KONTEKS TAMBAHAN - BUKTI DARI PELAPOR]\n{evidence_context}"
+        
+        logger.info(f"[VERIFY_WITH_EVIDENCE] Running verification with user evidence...")
+        
+        # Call verify function dengan enhanced claim
+        raw_result = module.verify_claim_local(
+            enhanced_claim,
+            k=8,  # Lebih banyak neighbors
+            dry_run=False,
+            enable_expansion=True,
+            min_relevance=0.2,  # Lower threshold untuk include evidence
+            force_dynamic_fetch=False,
+            debug_retrieval=False
+        )
+        
+        elapsed = time.time() - start_time
+        logger.info(f"[VERIFY_WITH_EVIDENCE] Completed in {elapsed:.2f}s")
+        
+        # Add user evidence to sources
+        if raw_result.get('sources') is None:
+            raw_result['sources'] = []
+        
+        # Tambahkan evidence user sebagai source pertama
+        user_source = {
+            'title': evidence.get('title', 'User Provided Evidence'),
+            'doi': evidence.get('doi', ''),
+            'url': evidence.get('url', ''),
+            'relevance_score': 0.95,  # High relevance karena dari user
+            '_from_dispute': True
+        }
+        raw_result['sources'].insert(0, user_source)
+        
+        return raw_result
+        
+    except Exception as e:
+        logger.error(f"[VERIFY_WITH_EVIDENCE] Error: {e}")
+        raise
 logger.info(f"  Exists: {VERIFY_SCRIPT.exists()}")
 logger.info(f"  Timeout: {VERIFICATION_TIMEOUT}s")
 logger.info(f"  Max Retries: {MAX_RETRIES}")

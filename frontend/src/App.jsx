@@ -8,6 +8,7 @@ import AdminClaimDetail from './pages/admin/AdminClaimDetail';
 import AdminClaims from './pages/admin/AdminClaims';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import AdminDisputes from './pages/admin/AdminDisputes';
+import AdminJournals from './pages/admin/AdminJournals';
 import AdminLogin from './pages/admin/AdminLogin';
 import AdminSources from './pages/admin/AdminSources';
 
@@ -30,6 +31,7 @@ function App() {
           <Route path='/admin/claims/:claimId' element={<AdminClaimDetail />}/>
           <Route path="/admin/disputes" element={<AdminDisputes />} />
           <Route path="/admin/sources" element={<AdminSources />} />
+          <Route path="/admin/journals" element={<AdminJournals />} />
         </Routes>
       </Router>
     </div>

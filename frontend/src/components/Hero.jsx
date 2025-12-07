@@ -18,6 +18,8 @@ const Hero = () => {
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState(null);
     const [loadingStage, setLoadingStage] = useState('');
+    const [loadingProgress, setLoadingProgress] = useState(0);
+    const [elapsedTime, setElapsedTime] = useState(0);
 
     /**
      * FORCE REFRESH untuk bypass cache
@@ -166,13 +168,32 @@ const Hero = () => {
         setTranslatedClaim(null);
         setLoadingStage(t('hero.dynamicLabels.analyzing'));
 
-        try {
-            // 🔧 Progress simulation untuk UX yang lebih baik
-            setTimeout(() => setLoadingStage(t('hero.dynamicLabels.searching')), 3000);
-            setTimeout(() => setLoadingStage(t('hero.dynamicLabels.evaluating')), 10000);
-            setTimeout(() => setLoadingStage(t('hero.dynamicLabels.finalizing')), 20000);
+        // Start progress timer
+        const startTime = Date.now();
+        const maxTime = 30000; // 30 seconds max
+        
+        const progressInterval = setInterval(() => {
+            const elapsed = Date.now() - startTime;
+            const progress = Math.min((elapsed / maxTime) * 100, 95);
+            setLoadingProgress(progress);
+            setElapsedTime(Math.floor(elapsed / 1000));
+            
+            // Update stage based on progress
+            if (progress < 15) {
+                setLoadingStage(t('hero.dynamicLabels.analyzing'));
+            } else if (progress < 40) {
+                setLoadingStage(t('hero.dynamicLabels.searching'));
+            } else if (progress < 70) {
+                setLoadingStage(t('hero.dynamicLabels.evaluating'));
+            } else {
+                setLoadingStage(t('hero.dynamicLabels.finalizing'));
+            }
+        }, 500); // Changed from 100ms to 500ms for smoother updates
 
+        try {
             const result = await verifyClaim(searchQuery);
+            clearInterval(progressInterval);
+            setLoadingProgress(100);
             setVerificationResult(result);
             
             const label = formatLabel(result.verification_result?.label).text;
@@ -187,6 +208,8 @@ const Hero = () => {
         } finally {
             setIsLoading(false);
             setLoadingStage('');
+            setLoadingProgress(0);
+            setElapsedTime(0);
         }
     };
 
@@ -266,21 +289,53 @@ const Hero = () => {
                 </div>
             )}
 
-            {/* Loading Skeleton with Stage Info */}
+            {/* Loading Animation - Clean & Smooth */}
             {isLoading && (
-                <div className="w-full bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden">
-                    <div className="h-2 bg-blue-500 w-full animate-pulse"></div>
-                    <div className="p-4 sm:p-6 md:p-8 space-y-4">
-                        <div className="text-center mb-4">
-                            <Loader2 className="w-10 h-10 sm:w-12 sm:h-12 mx-auto text-blue-500 animate-spin mb-2" />
-                            <p className="text-gray-600 font-medium text-sm sm:text-base">
+                <div className="w-full max-w-2xl bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
+                    {/* Smooth Progress Bar */}
+                    <div className="h-1.5 bg-gray-100 w-full">
+                        <div 
+                            className="h-full bg-blue-500 transition-[width] duration-500 ease-out"
+                            style={{ width: `${loadingProgress}%` }}
+                        />
+                    </div>
+                    
+                    <div className="p-6 sm:p-8">
+                        {/* Clean Spinner */}
+                        <div className="flex flex-col items-center">
+                            <div className="w-14 h-14 rounded-full border-4 border-gray-200 border-t-blue-500 animate-spin" />
+                            
+                            {/* Stage Text - No pulse, just clean text */}
+                            <p className="text-gray-800 font-medium text-base mt-5">
                                 {loadingStage || t('hero.analyzing')}
                             </p>
-                            <p className="text-xs sm:text-sm text-gray-500 mt-1">{t('hero.pleaseWait')}</p>
+                            
+                            {/* Minimal Stats */}
+                            <p className="text-gray-400 text-sm mt-1">
+                                {elapsedTime}s • {Math.round(loadingProgress)}%
+                            </p>
                         </div>
-                        <div className="h-6 sm:h-8 bg-gray-200 rounded animate-pulse"></div>
-                        <div className="h-20 sm:h-24 bg-gray-200 rounded animate-pulse"></div>
-                        <div className="h-14 sm:h-16 bg-gray-200 rounded animate-pulse"></div>
+                        
+                        {/* Simple Steps Indicator */}
+                        <div className="flex justify-center gap-2 mt-6">
+                            {[1, 2, 3, 4].map((step) => (
+                                <div 
+                                    key={step}
+                                    className={`w-2 h-2 rounded-full transition-colors duration-300 ${
+                                        loadingProgress >= step * 25 
+                                            ? 'bg-blue-500' 
+                                            : 'bg-gray-200'
+                                    }`}
+                                />
+                            ))}
+                        </div>
+                        
+                        {/* Clean Skeleton - Subtle opacity animation */}
+                        <div className="mt-6 space-y-3 opacity-60">
+                            <div className="h-5 bg-gray-100 rounded w-24" />
+                            <div className="h-16 bg-gray-50 rounded-lg" />
+                            <div className="h-12 bg-gray-50 rounded-lg" />
+                        </div>
                     </div>
                 </div>
             )}

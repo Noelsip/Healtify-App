@@ -1,7 +1,10 @@
 # langchain core
 langchain>=0.3,<0.4
 
-# Google Gemini integration
+# DeepSeek integration (OpenAI compatible)
+openai>=1.0.0
+
+# Google Gemini integration (for embeddings only)
 google-genai
 langchain-google-genai
 
@@ -19,6 +22,10 @@ pandas
 numpy
 tqdm
 python-dotenv
+
+# HTTP requests
+requests
+urllib3
 
 # pdf
 pymupdf

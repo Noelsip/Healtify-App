@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Claim, VerificationResult, Source, ClaimSource, Dispute
+from .models import Claim, VerificationResult, Source, ClaimSource, Dispute, JournalArticle
 
 class ClaimCreateSerializer(serializers.Serializer):
     text = serializers.CharField(
@@ -370,4 +370,65 @@ class DisputeReviewSerializer(serializers.Serializer):
             data['manual_update'] = False
         
         return data
+
+
+# ===========================
+# Journal Article Serializers
+# ===========================
+
+class JournalArticleSerializer(serializers.ModelSerializer):
+    """Serializer untuk menampilkan JournalArticle."""
+    created_by_name = serializers.SerializerMethodField()
     
+    class Meta:
+        model = JournalArticle
+        fields = [
+            'id',
+            'title',
+            'abstract',
+            'authors',
+            'doi',
+            'url',
+            'publisher',
+            'journal_name',
+            'published_date',
+            'source_portal',
+            'is_embedded',
+            'credibility_score',
+            'keywords',
+            'created_at',
+            'updated_at',
+            'created_by',
+            'created_by_name'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at', 'is_embedded']
+    
+    def get_created_by_name(self, obj):
+        if obj.created_by:
+            return obj.created_by.username
+        return None
+
+
+class JournalArticleCreateSerializer(serializers.Serializer):
+    """Serializer untuk membuat JournalArticle baru."""
+    title = serializers.CharField(max_length=1000, required=True)
+    abstract = serializers.CharField(required=True)
+    authors = serializers.CharField(max_length=2000, required=False, allow_blank=True)
+    doi = serializers.CharField(max_length=255, required=False, allow_blank=True, allow_null=True)
+    url = serializers.URLField(required=False, allow_blank=True, allow_null=True)
+    publisher = serializers.CharField(max_length=500, required=False, allow_blank=True)
+    journal_name = serializers.CharField(max_length=500, required=False, allow_blank=True)
+    published_date = serializers.DateField(required=False, allow_null=True)
+    source_portal = serializers.ChoiceField(
+        choices=['sinta', 'garuda', 'doaj', 'google_scholar', 'other'],
+        default='other'
+    )
+    keywords = serializers.CharField(required=False, allow_blank=True)
+    
+    def validate_doi(self, value):
+        """Validasi DOI unik jika ada."""
+        if value:
+            value = value.strip()
+            if JournalArticle.objects.filter(doi=value).exists():
+                raise serializers.ValidationError("Jurnal dengan DOI ini sudah ada.")
+        return value or None

@@ -164,6 +164,161 @@ def extract_pdf_urls_from_semantic_scholar(scholar_data: Dict[str, Any]) -> List
     return results
 
 
+def extract_pdf_urls_from_sciencedirect(scidir_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Extract PDF URLs dan metadata dari data ScienceDirect."""
+    results = []
+    
+    search_results = scidir_data.get("search-results", {})
+    entries = search_results.get("entry", [])
+    
+    for entry in entries:
+        doi = entry.get("prism:doi", "")
+        pii = entry.get("pii", "")
+        title = entry.get("dc:title", "")
+        
+        # Look for PDF URL in links
+        pdf_url = None
+        links = entry.get("link", [])
+        
+        for link in links:
+            if isinstance(link, dict):
+                ref = link.get("@ref", "")
+                href = link.get("@href", "")
+                
+                # Check for PDF or full-text links
+                if "pdf" in ref.lower() or "pdfurl" in ref.lower():
+                    pdf_url = href
+                    break
+                elif "full-text" in ref.lower() and href:
+                    # Some full-text links may be PDFs
+                    if href.lower().endswith(".pdf"):
+                        pdf_url = href
+                        break
+        
+        # Fallback: construct PDF URL from DOI if available
+        if not pdf_url and doi:
+            # Note: This may not always work without authentication
+            pdf_url = f"https://www.sciencedirect.com/science/article/pii/{pii}/pdf" if pii else None
+        
+        if pdf_url:
+            identifier = (
+                doi.replace("/", "_") if doi 
+                else pii or 
+                re.sub(r"\W+", "_", title)[:50] or 
+                "scidir_doc"
+            )
+            
+            results.append({
+                "id": identifier,
+                "pdf_url": pdf_url,
+                "title": title,
+                "doi": doi,
+                "source": "sciencedirect"
+            })
+    
+    return results
+
+
+def extract_pdf_urls_from_google_books(books_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Extract PDF URLs dan metadata dari data Google Books."""
+    results = []
+    
+    items = books_data.get("items", [])
+    
+    for item in items:
+        volume_info = item.get("volumeInfo", {})
+        access_info = item.get("accessInfo", {})
+        
+        google_id = item.get("id", "")
+        title = volume_info.get("title", "")
+        
+        # Look for PDF download link
+        pdf_url = None
+        
+        # Check if PDF is available
+        if access_info.get("pdf", {}).get("isAvailable"):
+            pdf_download_link = access_info.get("pdf", {}).get("downloadLink")
+            if pdf_download_link:
+                pdf_url = pdf_download_link
+        
+        # Alternative: check for epub and convert (less common)
+        if not pdf_url:
+            epub_link = access_info.get("epub", {}).get("downloadLink")
+            # We skip epub for now as it requires conversion
+            pass
+        
+        if pdf_url:
+            # Extract ISBN if available
+            isbn = None
+            for identifier in volume_info.get("industryIdentifiers", []):
+                if identifier.get("type") in ["ISBN_13", "ISBN_10"]:
+                    isbn = identifier.get("identifier")
+                    break
+            
+            identifier = (
+                google_id or 
+                isbn or 
+                re.sub(r"\W+", "_", title)[:50] or 
+                "gbook_doc"
+            )
+            
+            results.append({
+                "id": identifier,
+                "pdf_url": pdf_url,
+                "title": title,
+                "doi": None,  # Books typically don't have DOIs
+                "source": "google_books"
+            })
+    
+    return results
+
+
+def extract_pdf_urls_from_openlibrary(openlibrary_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Extract PDF URLs dan metadata dari data Open Library."""
+    results = []
+    
+    docs = openlibrary_data.get("docs", [])
+    
+    for doc in docs:
+        key = doc.get("key", "")
+        title = doc.get("title", "")
+        
+        # Open Library doesn't typically provide direct PDF downloads
+        # But we can check if there are any available formats
+        pdf_url = None
+        
+        # Check for Internet Archive lending links
+        ia_ids = doc.get("ia", [])
+        if ia_ids and isinstance(ia_ids, list) and len(ia_ids) > 0:
+            ia_id = ia_ids[0]
+            # Construct Internet Archive PDF link
+            pdf_url = f"https://archive.org/download/{ia_id}/{ia_id}.pdf"
+        
+        if pdf_url:
+            # Extract ISBN if available
+            isbn = None
+            isbns = doc.get("isbn", [])
+            if isbns:
+                isbn = isbns[0]
+            
+            identifier = (
+                key.replace("/", "_") if key 
+                else isbn or 
+                re.sub(r"\W+", "_", title)[:50] or 
+                "openlib_doc"
+            )
+            
+            results.append({
+                "id": identifier,
+                "pdf_url": pdf_url,
+                "title": title,
+                "doi": None,  # Books typically don't have DOIs
+                "source": "openlibrary"
+            })
+    
+    return results
+
+
 def build_api_items_from_raw_files() -> List[Dict[str, Any]]:
     """Build daftar API items dari semua file raw yang tersedia."""
     api_items = []
@@ -183,6 +338,30 @@ def build_api_items_from_raw_files() -> List[Dict[str, Any]]:
             api_items.extend(extract_pdf_urls_from_semantic_scholar(data))
         except Exception as e:
             print(f"[warn] Failed to parse {scholar_file.name}: {e}")
+    
+    # Process ScienceDirect files
+    for scidir_file in RAW_DIR.glob("sciencedirect_*.json"):
+        try:
+            data = json.loads(scidir_file.read_text(encoding="utf-8"))
+            api_items.extend(extract_pdf_urls_from_sciencedirect(data))
+        except Exception as e:
+            print(f"[warn] Failed to parse {scidir_file.name}: {e}")
+    
+    # Process Google Books files
+    for books_file in RAW_DIR.glob("google_books_*.json"):
+        try:
+            data = json.loads(books_file.read_text(encoding="utf-8"))
+            api_items.extend(extract_pdf_urls_from_google_books(data))
+        except Exception as e:
+            print(f"[warn] Failed to parse {books_file.name}: {e}")
+    
+    # Process Open Library files
+    for openlib_file in RAW_DIR.glob("openlibrary_*.json"):
+        try:
+            data = json.loads(openlib_file.read_text(encoding="utf-8"))
+            api_items.extend(extract_pdf_urls_from_openlibrary(data))
+        except Exception as e:
+            print(f"[warn] Failed to parse {openlib_file.name}: {e}")
     
     return api_items
 

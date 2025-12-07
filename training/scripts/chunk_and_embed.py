@@ -19,13 +19,18 @@ CHUNKS_DIR.mkdir(parents=True, exist_ok=True)
 load_dotenv(dotenv_path=BASE / ".env")
 _api_key = os.getenv("GEMINI_API_KEY")
 
+# Initialize Gemini client (optional for embeddings)
+client = None
 if _api_key:
-    client = genai.Client(api_key=_api_key)
+    try:
+        client = genai.Client(api_key=_api_key)
+        print("[INIT] Gemini client initialized for embeddings")
+    except Exception as e:
+        print(f"[WARNING] Failed to initialize Gemini client: {e}")
+        print("[INFO] Will use fallback embeddings if needed")
 else:
-    raise ValueError(
-        "Tidak menemukan GEMINI_API_KEY. "
-        "Set environment variable di .env file."
-    )
+    print("[WARNING] GEMINI_API_KEY not found - Gemini embeddings unavailable")
+    print("[INFO] Using alternative embedding methods")
 
 
 def list_processed_documents() -> List[Path]:
@@ -99,33 +104,73 @@ def split_by_words(text: str, words_per_chunk: int = 300, overlap_words: int = 3
     return chunks
 
 
+def _embed_with_sentence_transformers(texts: List[str]) -> List[List[float]]:
+    """Fallback embedding menggunakan sentence-transformers.
+    Uses 768-dimensional model to match Gemini embeddings in database."""
+    try:
+        from sentence_transformers import SentenceTransformer
+        
+        # Use global cache to avoid reloading model every time
+        global _st_model_cache
+        if '_st_model_cache' not in globals() or _st_model_cache is None:
+            print("[EMBED] Loading sentence-transformers model (768-dim)...")
+            # Use 768-dimensional model to match Gemini
+            _st_model_cache = SentenceTransformer('sentence-transformers/all-mpnet-base-v2')
+            print("[EMBED] Model loaded and cached")
+        else:
+            print("[EMBED] Using cached model")
+        
+        print(f"[EMBED] Generating embeddings for {len(texts)} texts...")
+        embeddings = _st_model_cache.encode(texts, show_progress_bar=True, convert_to_numpy=True)
+        return [emb.tolist() for emb in embeddings]
+    except ImportError:
+        print("[ERROR] sentence-transformers not installed!")
+        print("[INFO] Returning zero vectors as last resort")
+        # Return zero vectors (768 dimensions to match Gemini)
+        return [[0.0] * 768 for _ in texts]
+    except Exception as e:
+        print(f"[ERROR] Sentence-transformers embedding failed: {e}")
+        return [[0.0] * 768 for _ in texts]
+
+# Global model cache
+_st_model_cache = None
+
+
 def embed_texts_gemini(
     texts: List[str],
     model: str = "gemini-embedding-001",
     batch_size: int = 32,
-    output_dimensionality: Optional[int] = None,
     max_retries: int = 3,
-    backoff_seconds: float = 1.0
+    backoff_seconds: float = 1.0,
 ) -> List[List[float]]:
-    """Generate embeddings untuk daftar teks menggunakan Gemini API."""
+    """
+    Embed teks menggunakan Gemini Embedding API dengan batching dan retry logic.
+    Falls back to sentence-transformers jika Gemini tidak tersedia.
+    """
     if not texts:
         return []
-
-    if batch_size < 1:
-        batch_size = 1
-
-    embeddings: List[List[float]] = []
-
-    # Proses teks per batch untuk menghindari request yang terlalu besar
-    for i in range(0, len(texts), batch_size):
-        batch = texts[i : i + batch_size]
-        embeddings.extend(_process_embedding_batch(batch, model, output_dimensionality, max_retries, backoff_seconds))
-
-    # Validasi jumlah embedding dengan input
-    if len(embeddings) != len(texts):
-        raise RuntimeError(f"Embedding mismatch: got {len(embeddings)} embeddings for {len(texts)} inputs")
     
-    return embeddings
+    # Check if Gemini client is available
+    if client is None:
+        print("[WARNING] Gemini client not available, using sentence-transformers fallback")
+        return _embed_with_sentence_transformers(texts)
+
+    embeddings = []
+    try:
+        for i in tqdm(range(0, len(texts), batch_size), desc="Embedding batches"):
+            batch = texts[i : i + batch_size]
+            
+            batch_embeddings = _process_embedding_batch(
+                batch, model, None, max_retries, backoff_seconds
+            )
+            
+            embeddings.extend(batch_embeddings)
+        
+        return embeddings
+    except Exception as e:
+        print(f"[ERROR] Gemini embedding failed: {e}")
+        print("[INFO] Falling back to sentence-transformers")
+        return _embed_with_sentence_transformers(texts)
 
 
 def _process_embedding_batch(

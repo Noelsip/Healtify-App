@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework.decorators import api_view
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
+from .permissions import IsAdminOrReadOnly
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.db import transaction, models
@@ -15,13 +16,16 @@ from django.db.models import Q
 from django.http import Http404
 from django.conf import settings
 from django.core.cache import cache
-from .models import Claim, VerificationResult, Source, ClaimSource, Dispute
+import json
+from .models import Claim, VerificationResult, Source, ClaimSource, Dispute, JournalArticle
 from .serializers import (
     ClaimCreateSerializer, 
     ClaimDetailSerializer, 
     DisputeCreateSerializer, 
     DisputeDetailSerializer,
-    DisputeAdminActionSerializer
+    DisputeAdminActionSerializer,
+    JournalArticleSerializer,
+    JournalArticleCreateSerializer
 )
 from .text_normalization import (
     ClaimSimilarityMatcher, 
@@ -39,12 +43,18 @@ _gemini_client = None
 # Utility Functions 
 # ===========================
 def get_gemini_client():
+    """Get Gemini client, returns None if API key not available."""
     global _gemini_client
     if _gemini_client is None:
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
-            raise ValueError("GEMINI_API_KEY not found")
-        _gemini_client = genai.Client(api_key=api_key)
+            logger.warning("GEMINI_API_KEY not found - Gemini features disabled")
+            return None
+        try:
+            _gemini_client = genai.Client(api_key=api_key)
+        except Exception as e:
+            logger.error(f"Failed to initialize Gemini client: {e}")
+            return None
     return _gemini_client
 
 def normalize_claim_text(text: str) -> str:
@@ -290,13 +300,22 @@ def translate_label(label: str, target_lang: str) -> str:
     return mapping.get(label_lower, label.upper())
 
 def translate_text_gemini(text: str, target_lang: str) -> str:
-    """Translate text menggunakan Gemini API (output hanya teks terjemahan)."""
+    """Translate text menggunakan Gemini API (output hanya teks terjemahan).
+    Returns original text if Gemini not available."""
     if not text or len(text) < 10:
         return text
     
-    lang_name = "English" if target_lang == 'en' else "Indonesian"
-    
-    prompt = f"""You are a professional medical translator.
+    try:
+        client = get_gemini_client()
+        
+        # If Gemini not available, return original text
+        if client is None:
+            logger.warning("[TRANSLATE] Gemini client not available, returning original text")
+            return text
+        
+        lang_name = "English" if target_lang == 'en' else "Indonesian"
+        
+        prompt = f"""You are a professional medical translator.
 Translate the following medical/health text into {lang_name}.
 
 Requirements:
@@ -308,9 +327,6 @@ Requirements:
 Text to translate:
 {text}
 """
-    
-    try:
-        client = get_gemini_client()
         
         resp = client.models.generate_content(
             model="gemini-2.5-flash-lite",
@@ -1038,3 +1054,230 @@ def _get_explanation(similarity: float) -> str:
         return "Agak mirip (mungkin topik yang sama)"
     else:
         return "Tidak mirip"
+
+# Admin Journal Management
+class AdminJournalListView(APIView):
+    """
+        GET: List journals,
+        POST: Create new Journal
+    """
+    permission_classes = [IsAuthenticated, IsAdminOrReadOnly]
+
+    def get(self, request):
+        search = request.GET.get('search', '')
+        source = request.GET.get('source', '')
+        page = int(request.GET.get('page', 1))
+        per_page = int(request.GET.get('per_page', 20))
+
+        journals = JournalArticle.objects.all()
+
+        if search:
+            journals = journals.filter(
+                Q(title__icontains=search) |
+                Q(abstract__icontains=search) |
+                Q(keywords__icontains=search)
+            )
+
+        if source:
+            journals = journals.filter(source_portal=source)
+            
+        journals = journals.order_by('-created_at')
+        total = journals.count()
+
+        start = (page-1) * per_page
+        journals_page = journals[start:start + per_page]
+
+        return Response({
+            'journals': JournalArticleSerializer(journals_page, many=True).data,
+            'pagination': {
+                'page': page,
+                'per_page': per_page,
+                'total': total,
+                'total_pages': (total + per_page - 1) // per_page
+            }
+        })
+    
+    def post(self, request):
+        """Create new journal article"""
+        serializer = JournalArticleCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=400)
+        
+        journal = JournalArticle.objects.create(
+            **serializer.validated_data,
+            created_by=request.user
+        )
+        
+        # Auto-embed if abstract is provided
+        if journal.abstract:
+            try:
+                embed_journal_article(journal)
+            except Exception as e:
+                logger.warning(f"Auto-embed failed for journal {journal.id}: {e}")
+        
+        return Response({
+            'message': 'Journal created successfully',
+            'journal': JournalArticleSerializer(journal).data
+        }, status=201)
+
+
+class AdminJournalEmbedView(APIView):
+    """Embed journal articles ke vector database"""
+    permission_classes = [IsAuthenticated, IsAdminOrReadOnly]
+    
+    def post(self, request):
+        """Batch embed journals yang belum di-embed"""
+        journal_ids = request.data.get('journal_ids', [])
+        
+        if journal_ids:
+            journals = JournalArticle.objects.filter(id__in=journal_ids, is_embedded=False)
+        else:
+            journals = JournalArticle.objects.filter(is_embedded=False)[:50]
+        
+        embedded_count = 0
+        for journal in journals:
+            try:
+                embed_journal_article(journal)
+                embedded_count += 1
+            except Exception as e:
+                logger.error(f"Embed failed for journal {journal.id}: {e}")
+        
+        return Response({
+            'message': f'Embedded {embedded_count} journals',
+            'embedded_count': embedded_count
+        })
+
+
+def embed_journal_article(journal: JournalArticle):
+    """Embed single journal article to vector database."""
+    from training.scripts.chunk_and_embed import embed_texts_gemini
+    from training.scripts.ingest_chunks_to_pg import connect_db, DB_TABLE
+    
+    text = f"{journal.title}\n\n{journal.abstract}"
+    embedding = embed_texts_gemini([text])[0]
+    
+    # Save embedding to journal
+    journal.embedding = json.dumps(embedding)
+    journal.is_embedded = True
+    journal.save()
+    
+    # Also insert to embeddings table for RAG
+    conn = connect_db()
+    try:
+        with conn.cursor() as cur:
+            emb_str = "[" + ",".join(str(float(x)) for x in embedding) + "]"
+            cur.execute(f"""
+                INSERT INTO {DB_TABLE} (doc_id, safe_id, source_file, chunk_index, n_words, text, doi, embedding)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s::vector)
+            """, (
+                f"journal_{journal.id}",
+                journal.doi or f"journal_{journal.id}",
+                f"admin_import_{journal.source_portal}",
+                0,
+                len(text.split()),
+                text,
+                journal.doi or "",
+                emb_str
+            ))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+class AdminJournalDetailView(APIView):
+    """GET, PUT, DELETE single journal article."""
+    permission_classes = [IsAuthenticated, IsAdminUser]
+    
+    def get(self, request, journal_id):
+        """Get single journal detail."""
+        try:
+            journal = JournalArticle.objects.get(id=journal_id)
+            return Response({
+                'journal': JournalArticleSerializer(journal).data
+            })
+        except JournalArticle.DoesNotExist:
+            return Response({'error': 'Journal not found'}, status=404)
+    
+    def put(self, request, journal_id):
+        """Update journal article."""
+        try:
+            journal = JournalArticle.objects.get(id=journal_id)
+            
+            # Update fields
+            for field in ['title', 'abstract', 'authors', 'doi', 'url', 'publisher', 
+                         'journal_name', 'published_date', 'source_portal', 'keywords']:
+                if field in request.data:
+                    setattr(journal, field, request.data[field] or getattr(journal, field))
+            
+            journal.save()
+            
+            return Response({
+                'message': 'Journal updated successfully',
+                'journal': JournalArticleSerializer(journal).data
+            })
+        except JournalArticle.DoesNotExist:
+            return Response({'error': 'Journal not found'}, status=404)
+        except Exception as e:
+            logger.error(f"Error updating journal: {e}")
+            return Response({'error': str(e)}, status=500)
+    
+    def delete(self, request, journal_id):
+        """Delete journal article."""
+        try:
+            journal = JournalArticle.objects.get(id=journal_id)
+            title = journal.title
+            journal.delete()
+            
+            return Response({
+                'message': f'Journal "{title[:50]}..." deleted successfully'
+            })
+        except JournalArticle.DoesNotExist:
+            return Response({'error': 'Journal not found'}, status=404)
+        except Exception as e:
+            logger.error(f"Error deleting journal: {e}")
+            return Response({'error': str(e)}, status=500)
+
+
+class AdminJournalImportView(APIView):
+    """Bulk import journals from file or API."""
+    permission_classes = [IsAuthenticated, IsAdminUser]
+    
+    def post(self, request):
+        """Bulk import journals."""
+        journals_data = request.data.get('journals', [])
+        
+        if not journals_data:
+            return Response({'error': 'No journals provided'}, status=400)
+        
+        created_count = 0
+        errors = []
+        
+        for idx, data in enumerate(journals_data):
+            try:
+                # Skip if DOI already exists
+                if data.get('doi') and JournalArticle.objects.filter(doi=data['doi']).exists():
+                    errors.append(f"Journal {idx+1}: DOI already exists")
+                    continue
+                
+                journal = JournalArticle.objects.create(
+                    title=data.get('title', ''),
+                    abstract=data.get('abstract', ''),
+                    authors=data.get('authors', ''),
+                    doi=data.get('doi') or None,
+                    url=data.get('url') or None,
+                    publisher=data.get('publisher', ''),
+                    journal_name=data.get('journal_name', ''),
+                    source_portal=data.get('source_portal', 'other'),
+                    keywords=data.get('keywords', ''),
+                    created_by=request.user
+                )
+                created_count += 1
+                
+            except Exception as e:
+                errors.append(f"Journal {idx+1}: {str(e)}")
+        
+        return Response({
+            'message': f'Imported {created_count} journals',
+            'created_count': created_count,
+            'errors': errors
+        }, status=201 if created_count > 0 else 400)

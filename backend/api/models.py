@@ -39,15 +39,8 @@ class Source(models.Model):
 class Claim(models.Model):
     text = models.TextField()
     text_normalized = models.TextField(blank=True, null=True)
-    text_hash = models.CharField(max_length=64, unique=True, db_index=True)
+    text_hash = models.CharField(max_length=64, db_index=True, null=True, blank=True)
 
-    def save(self, *args, **kwargs):
-        # Auto-generate normalized text & hash saat save
-        self.text_normalized = normalize_claim_text(self.text)
-        self.text_hash = generate_semantic_hash(self.text)
-        super().save(*args, **kwargs)
-
-    # status proses verifikasi klaim
     STATUS_PENDING = 'pending'
     STATUS_PROCESSING = 'processing'
     STATUS_DONE = 'done'
@@ -59,31 +52,20 @@ class Claim(models.Model):
         (STATUS_DISPUTED, 'Disputed'),
     ]
 
-    status = models.CharField(
-        max_length=32,
-        choices=STATUS_CHOICES,
-        default=STATUS_PENDING,
-    )
-
-    # timestamps
+    status = models.CharField(max_length=32, choices=STATUS_CHOICES, default=STATUS_PENDING)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-
-    # relasi ke sumber
     sources = models.ManyToManyField(Source, through='ClaimSource', blank=True)
-    
-    text_hash = models.CharField(max_length=64, db_index=True, null=True, blank=True)
 
     def save(self, *args, **kwargs):
-        # generate hash untuk claim text
-        if not self.text_hash and self.text:
-            import hashlib
-            self.text_hash = hashlib.sha256(self.text.strip().lower()).hexdigest()
+        # Auto-generate normalized text & hash saat save
+        self.text_normalized = normalize_claim_text(self.text)
+        self.text_hash = generate_semantic_hash(self.text)
         super().save(*args, **kwargs)
-        
+
     def __str__(self):
         return f'Claim #{self.pk} - {self.text[:50]}...'
-    
+
     class Meta:
         indexes = [
             models.Index(fields=['text_hash']),
@@ -267,3 +249,54 @@ class FAQItem(models.Model):
 
     def __str__(self):
         return f'FAQ: {self.question[:60]}'
+
+class JournalArticle(models.Model):
+    """
+        Model untuk menyimpan jurnal indonesia yang diinput admin
+    """
+
+    SOURCE_CHOICE = [
+        ('sinta', 'SINTA'),
+        ('garuda', 'Garuda'),
+        ('doaj', 'DOAJ'),
+        ('google_scholar', 'Google Scholar'),
+        ('other', 'Other'),
+    ]
+
+    title = models.CharField(max_length=1000)
+    abstract = models.TextField()
+    authors = models.TextField(blank=True, null=True)
+    doi = models.CharField(max_length=255, blank=True, null=True, unique=True)
+    url = models.URLField(blank=True, null=True)
+    publisher = models.CharField(max_length=500, blank=True, null=True)
+    journal_name = models.CharField(max_length=500, blank=True, null=True)
+    published_date = models.DateField(blank=True, null=True)
+
+    source_portal = models.CharField(
+        max_length=50,
+        choices=SOURCE_CHOICE,
+        default='other'
+    )
+
+    # Untuk RAG Embedding
+    embedding = models.TextField(blank=True, null=True)
+    is_embedded = models.BooleanField(default=False)
+
+    # Metadata
+    credibility_score = models.FloatField(blank=True, null=True)
+    keywords = models.TextField(blank=True, null=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey('auth.User', on_delete=models.SET_NULL, null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['doi']),
+            models.Index(fields=['title']),
+            models.Index(fields=['is_embedded']),
+        ]
+
+    def __str__(self):
+        return f"{self.title[:80]}... ({self.source_portal})"

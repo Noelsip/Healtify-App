@@ -7,16 +7,13 @@ import pathlib
 import argparse
 import sys
 import traceback
-import hashlib
-import pickle
 from typing import List, Dict, Any, Optional
-from functools import lru_cache
-from functools import lru_cache
 from pathlib import Path
 
 # library ketiga
 from dotenv import load_dotenv, find_dotenv
 from google import genai
+from openai import OpenAI
 from psycopg2.extras import RealDictCursor
 from pgvector.psycopg2 import register_vector
 
@@ -30,6 +27,15 @@ from ingest_chunks_to_pg import connect_db, DB_TABLE
 from chunk_and_embed import embed_texts_gemini
 from fetch_sources import fetch_all_sources
 
+# Cache module
+try:
+    import cache_manager as cache
+    CACHE_ENABLED = True
+    print("[INIT] Cache manager loaded", file=sys.stderr)
+except ImportError:
+    CACHE_ENABLED = False
+    print("[INIT] Cache manager not available", file=sys.stderr)
+
 BASE = pathlib.Path(__file__).parent     
 TRAINING_DIR = BASE.parent          
 PROJECT_ROOT = TRAINING_DIR.parent       
@@ -37,9 +43,6 @@ PROJECT_ROOT = TRAINING_DIR.parent
 # Memastikan folder data/chunks exists
 DATA_DIR = TRAINING_DIR / "data"
 CHUNKS_DIR = DATA_DIR / "chunks"
-
-CACHE_DIR = DATA_DIR / "llm_cache"
-CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # helper untuk menyimpan hasil verifikasi
 VERIFICATION_RESULTS_PATH = TRAINING_DIR / "data" / "metadata" / "verification_results.jsonl"
@@ -77,78 +80,238 @@ def load_environment_variables():
 # Load environment variables
 load_environment_variables()
 
-# error handling untuk client initialization
+# Initialize Gemini client for embeddings (OPTIONAL)
 try:
-    client = getattr(cae, "client", None)
+    gemini_client = getattr(cae, "client", None)
 except Exception as e:
     print(f"[INIT] Warning: Could not get client from cae module: {e}", file=sys.stderr)
-    client = None
+    gemini_client = None
 
-if client is None:
+if gemini_client is None:
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
     if not GEMINI_API_KEY:
-        error_msg = (
-            "GEMINI_API_KEY tidak ditemukan di environment variables.\n"
-            f"Lokasi .env yang dicek:\n"
-            f"  1. {TRAINING_DIR / '.env'}\n"
-            f"  2. {PROJECT_ROOT / '.env'}\n"
-            f"  3. Auto-detected location\n"
-            f"Pastikan file .env exists dan berisi GEMINI_API_KEY=your_key_here"
-        )
-        print(f"[ERROR] {error_msg}", file=sys.stderr)
-        sys.exit(2)  # Exit code 2 untuk missing configuration
-    
-    try:
-        client = genai.Client(api_key=GEMINI_API_KEY)
-        print("[INIT] Gemini client initialized successfully", file=sys.stderr)
-    except Exception as e:
-        print(f"[ERROR] Failed to initialize Gemini client: {e}", file=sys.stderr)
-        traceback.print_exc(file=sys.stderr)
-        sys.exit(2)
-
-def _get_cache_key(text: str, prefix: str = "") -> str:
-    """
-        Generate Caache key untuk LLM response.
-    """
-    content = f"{prefix}:{text}".encode('utf-8')
-    return hashlib.md5(content).hexdigest()
-
-def _load_from_cache(cache_key: str) -> Optional[Any]:
-    """Load Cache LLM Response."""
-    cache_file = CACHE_DIR / f"{cache_key}.pkl"
-    if cache_file.exists():
+        print(f"[WARNING] GEMINI_API_KEY not found - Gemini features disabled (using fallbacks)", file=sys.stderr)
+        print(f"[INFO] Translation will pass-through, embeddings will use sentence-transformers", file=sys.stderr)
+    else:
         try:
-            with open(cache_file, 'rb') as f:
-                data = pickle.load(f)
-                # Check if cache is still valid (24 jam)
-                if time.time() - data['timestamp'] < 86400:
-                    return data['result']
+            gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+            print("[INIT] Gemini client initialized for embeddings & translation", file=sys.stderr)
         except Exception as e:
-            print(f"[CACHE] Error Loading cache: {e}")
-    return None
+            print(f"[ERROR] Failed to initialize Gemini client: {e}", file=sys.stderr)
+            print(f"[INFO] Will use fallback methods", file=sys.stderr)
 
-def _save_to_cache(cache_key: str, result: Any):
-    """Save LLM response to cache."""
-    cache_file = CACHE_DIR / f"{cache_key}.pkl"
-    try:
-        with open(cache_file, 'wb') as f:
-            pickle.dump({'timestamp': time.time(), 'result': result}, f)
-    except Exception as e:
-        print(f"[CACHE] Error saving cache: {e}")
+# Initialize DeepSeek client for LLM
+# ===========================
+# LLM Provider Configuration (Groq / DeepSeek / OpenRouter)
+# ===========================
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq").lower()  # groq, deepseek, openrouter
+LLM_API_KEY = os.getenv("LLM_API_KEY") or os.getenv("GROQ_API_KEY") or os.getenv("DEEPSEEK_API_KEY")
+LLM_BASE_URL = os.getenv("LLM_BASE_URL")
+LLM_MODEL = os.getenv("LLM_MODEL")
 
-def get_cache_stats() -> Dict[str, Any]:
-    """Get cache statistics untuk monitoring."""
-    if not CACHE_DIR.exists():
-        return {"error": "Cache directory does not exist"}
-    
-    cache_files = list(CACHE_DIR.glob("*.pkl"))
-    total_size = sum(f.stat().st_size for f in cache_files)
-    
-    return {
-        "total_cached_items": len(cache_files),
-        "total_size_mb": total_size / (1024 * 1024),
-        "cache_dir": str(CACHE_DIR)
+# Default settings per provider
+PROVIDER_DEFAULTS = {
+    "groq": {
+        "base_url": "https://api.groq.com/openai/v1",
+        "model": "llama-3.1-8b-instant"  # Fast & good for JSON
+    },
+    "deepseek": {
+        "base_url": "https://api.deepseek.com",
+        "model": "deepseek-chat"
+    },
+    "openrouter": {
+        "base_url": "https://openrouter.ai/api/v1",
+        "model": "meta-llama/llama-3.1-8b-instruct"
     }
+}
+
+if not LLM_API_KEY:
+    error_msg = (
+        f"LLM API Key tidak ditemukan di environment variables.\n"
+        f"Provider: {LLM_PROVIDER}\n"
+        f"Lokasi .env yang dicek:\n"
+        f"  1. {TRAINING_DIR / '.env'}\n"
+        f"  2. {PROJECT_ROOT / '.env'}\n"
+        f"Tambahkan salah satu:\n"
+        f"  - LLM_API_KEY=your_key\n"
+        f"  - GROQ_API_KEY=gsk_xxx (untuk Groq)\n"
+        f"  - DEEPSEEK_API_KEY=sk_xxx (untuk DeepSeek)"
+    )
+    print(f"[ERROR] {error_msg}", file=sys.stderr)
+    sys.exit(2)
+
+# Apply defaults if not specified
+if not LLM_BASE_URL:
+    LLM_BASE_URL = PROVIDER_DEFAULTS.get(LLM_PROVIDER, {}).get("base_url", "https://api.groq.com/openai/v1")
+if not LLM_MODEL:
+    LLM_MODEL = PROVIDER_DEFAULTS.get(LLM_PROVIDER, {}).get("model", "llama-3.1-8b-instant")
+
+try:
+    llm_client = OpenAI(
+        api_key=LLM_API_KEY,
+        base_url=LLM_BASE_URL
+    )
+    print(f"[INIT] LLM client initialized: {LLM_PROVIDER.upper()} ({LLM_MODEL})", file=sys.stderr)
+    print(f"[INIT]   Base URL: {LLM_BASE_URL}", file=sys.stderr)
+except Exception as e:
+    print(f"[ERROR] Failed to initialize LLM client: {e}", file=sys.stderr)
+    traceback.print_exc(file=sys.stderr)
+    sys.exit(2)
+
+# Backward compatibility alias
+deepseek_client = llm_client
+
+# ===========================
+# DOI & Paper Quality Filtering
+# ===========================
+
+def is_valid_academic_doi(doi: str, url: str = "") -> bool:
+    """
+    Filter DOI untuk memastikan hanya paper ilmiah, bukan berita atau blog.
+    
+    Returns True hanya jika DOI mengarah ke:
+    - Journal articles (peer-reviewed)
+    - Conference papers  
+    - Academic books/chapters
+    - Preprints dari repositori terpercaya
+    
+    Returns False untuk:
+    - News articles / journalism
+    - Blog posts
+    - Magazine articles
+    - Non-academic websites
+    """
+    if not doi:
+        return False
+    
+    doi = doi.strip().lower()
+    
+    # Blacklist: Publisher DOI prefix yang BUKAN academic papers
+    journalism_publishers = [
+        "10.1038/d",  # Nature News (bukan Nature Research papers)
+        "10.1126/science.a",  # Science News articles
+        "10.1136/bmj.",  # BMJ news (some are news, need more checks)
+        "10.1080/14753",  # News/magazine articles
+    ]
+    
+    for prefix in journalism_publishers:
+        if doi.startswith(prefix):
+            return False
+    
+    # Whitelist: Trusted academic publishers & repositories
+    academic_publishers = [
+        "10.1001/",    
+        "10.1016/",    
+        "10.1038/s",   
+        "10.1038/nj",  
+        "10.1126/sci", 
+        "10.1056/",    
+        "10.1136/",    
+        "10.1371/",    
+        "10.1186/",    
+        "10.3389/",    
+        "10.1080/",    
+        "10.1111/",    
+        "10.1093/",    
+        "10.1017/",    
+        "10.1097/",    
+        "10.1002/",    
+        "10.1007/",    
+        "10.1101/",    
+        "10.15252/",   
+        "10.1073/",    
+        "10.1021/",    
+        "10.1039/",    
+        "10.1088/",    
+        "10.1103/",    
+        "10.1109/",    
+        "10.1145/",    
+        "10.48550/",   
+    ]
+    
+    for prefix in academic_publishers:
+        if doi.startswith(prefix):
+            return True
+    
+    # Check URL patterns for additional verification
+    if url:
+        url_lower = url.lower()
+        
+        # Definite news/journalism patterns
+        news_patterns = [
+            "/news/", "/article/", "/blog/", "/opinion/",
+            "theconversation.com", "medium.com", "forbes.com",
+            "/press-release", "/magazine/", "/newsletter/"
+        ]
+        
+        for pattern in news_patterns:
+            if pattern in url_lower:
+                return False
+        
+        # Academic repository/journal patterns
+        academic_patterns = [
+            "sciencedirect.com/science/article",
+            "nature.com/articles/s",
+            "ncbi.nlm.nih.gov/pmc",
+            "pubmed.ncbi.nlm.nih.gov",
+            "scholar.google",
+            "arxiv.org/abs",
+            "biorxiv.org/content",
+            "medrxiv.org/content",
+            "journals.",  # journals.plos.org, etc.
+            "/journal/",
+        ]
+        
+        for pattern in academic_patterns:
+            if pattern in url_lower:
+                return True
+    
+    # If DOI exists but not in whitelist/blacklist, be conservative
+    # Only accept if it looks like a standard DOI pattern
+    import re
+    # Standard academic DOI usually has format: 10.XXXX/...
+    if re.match(r'^10\.\d{4,}/\S+', doi):
+        return True
+    
+    return False
+
+
+def filter_academic_neighbors(neighbors: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Filter neighbors untuk hanya menyertakan paper akademik berkualitas.
+    Removes berita jurnalistik, blog, dan sumber non-peer-reviewed.
+    """
+    filtered = []
+    
+    for nb in neighbors:
+        doi = nb.get("doi", "")
+        url = nb.get("url", "") or nb.get("source_url", "")
+        
+        # Jika ada DOI, validate
+        if doi:
+            if is_valid_academic_doi(doi, url):
+                nb["_is_academic"] = True
+                filtered.append(nb)
+            else:
+                print(f"[FILTER] Rejected non-academic DOI: {doi}", file=sys.stderr)
+        # Jika tidak ada DOI, check URL
+        elif url:
+            # More lenient for non-DOI sources dari database
+            if any(pattern in url.lower() for pattern in [
+                "pubmed", "pmc", "arxiv", "biorxiv", "medrxiv", 
+                "sciencedirect", "springer", "wiley"
+            ]):
+                nb["_is_academic"] = True
+                filtered.append(nb)
+            else:
+                print(f"[FILTER] Rejected source without valid DOI/URL: {url[:100]}", file=sys.stderr)
+        else:
+            # No DOI and no URL - keep if from trusted DB but mark
+            nb["_is_academic"] = False
+            filtered.append(nb)
+    
+    return filtered
+
 
 # Better database connection check dengan proper error handling
 def check_database_connection():
@@ -181,11 +344,9 @@ LLM_CONF_THRESHOLD = 0.75
 COMBINED_CONF_THRESHOLD = 0.75
 
 # Konfigurasi untuk ekspansi pola relevansi berbasis LLM
-_EXPANSION_CACHE: Dict[str, Dict[str, Any]] = {}
-EXPANSION_CACHE_TTL = 60 * 60  # 1 jam TTL
 EXPANSION_MAX_TERMS = 12
 EXPANSION_MIN_TERMS = 3
-EXPANSION_MODEL = "gemini-2.5-flash-lite"
+EXPANSION_MODEL = "gemini-2.5-flash"
 EXPANSION_TIMEOUT = 6.0
 
 # -----------------------
@@ -242,10 +403,6 @@ def safe_strip(s) -> str:
 # Ekspansi pola berbasis LLM
 # -----------------------
 
-def _claim_cache_key(claim: str) -> str:
-    """Buat kunci cache unik untuk klaim."""
-    return str(abs(hash(claim)))[:20]
-
 def _safe_parse_json_array(text: str) -> List[str]:
     """Parser JSON array yang toleran: jika LLM mengembalikan plaintext, coba parsing per baris."""
     text = text.strip()
@@ -279,79 +436,40 @@ def _safe_parse_json_array(text: str) -> List[str]:
     return candidates
 
 def expand_relevance_patterns(claim: str, force_refresh: bool = False) -> List[str]:
+    """Generate pola relevansi secara ringan TANPA LLM.
+
+    - Ambil kata kunci penting dari klaim
+    - Tambahkan sedikit istilah medis umum sebagai fallback
+    - Kembalikan list lowercase untuk dipakai di compute_relevance_score
     """
-    Gunakan LLM (Gemini) untuk menghasilkan kata kunci/istilah relevan untuk klaim.
-    Mengembalikan list kata/phrase dalam lowercase dengan caching untuk efisiensi.
-    """
-    claim_key = _claim_cache_key(claim)
-    now = int(time.time())
+    claim_clean = safe_strip(claim).lower()
+    tokens = re.split(r"[^a-zA-Z0-9]+", claim_clean)
+    tokens = [t for t in tokens if len(t) > 3]
 
-    # Kembalikan cache jika masih fresh
-    cached = _EXPANSION_CACHE.get(claim_key)
-    if not force_refresh:
-        cache_key = _get_cache_key(claim, "relevance_patterns")
-        cached = _load_from_cache(cache_key)
-        if cached:
-            print(f"[CACHE HIT] Using cached relevance patterns")
-            return cached
+    base_terms: List[str] = []
+    for t in tokens:
+        if t not in base_terms:
+            base_terms.append(t)
 
-    # Buat prompt untuk ekspansi pola yang lebih medis dan kontekstual
-    prompt = (
-        f"Anda adalah research assistant medis. Berikan array JSON berisi {EXPANSION_MAX_TERMS} "
-        f"istilah pencarian akademik yang spesifik dan relevan untuk meneliti klaim medis ini secara mendalam.\n\n"
-        f"Klaim: \"{claim}\"\n\n"
-        f"Persyaratan:\n"
-        f"- Sertakan istilah medis/dermatologi yang tepat (contoh: 'facial steaming', 'skin hydration', 'pore dilation')\n"
-        f"- Tambahkan mekanisme biologis (contoh: 'vasodilation', 'sebum production', 'collagen synthesis')\n"
-        f"- Sertakan konteks klinis (contoh: 'dermatology study', 'skin care efficacy', 'cosmetic dermatology')\n"
-        f"- Gunakan variasi bahasa Inggris dan Indonesia untuk coverage maksimal\n"
-        f"- Fokus pada aspek yang bisa dibuktikan secara ilmiah\n\n"
-        f"Format: [\"term1\", \"term2\", \"term3\", ...]\n"
-        f"Contoh untuk klaim uap: [\"facial steaming\", \"steam therapy skin\", \"terapi uap wajah\", \"skin hydration mechanism\", \"pore cleansing\", \"dermatology steam\"]"
-    )
+    # Tambah beberapa istilah medis umum sebagai fallback
+    medical_fallback = [
+        "medical research", "clinical study", "dermatology", "skin care",
+        "health effects", "scientific evidence", "medical journal",
+        "randomized trial", "systematic review", "meta analysis"
+    ]
 
-    try:
-        resp = client.models.generate_content(
-            model=EXPANSION_MODEL,
-            contents=prompt,
-            config={"temperature": 0.3, "max_output_tokens": 2000}
-        )
-        txt = extract_text_from_model_resp(resp)
-        txt = safe_strip(txt)
-        patterns = _safe_parse_json_array(txt)
-        
-        # Normalisasi dan filter
-        patterns_norm = []
-        for p in patterns:
-            p2 = re.sub(r'\s+', ' ', p).strip().lower()
-            if p2 and p2 not in patterns_norm and len(p2) > 2:
-                patterns_norm.append(p2)
-            if len(patterns_norm) >= EXPANSION_MAX_TERMS:
-                break
+    patterns_norm: List[str] = []
+    for p in base_terms + medical_fallback:
+        p2 = re.sub(r"\s+", " ", p).strip().lower()
+        if p2 and p2 not in patterns_norm and len(p2) > 2:
+            patterns_norm.append(p2)
+        if len(patterns_norm) >= EXPANSION_MAX_TERMS:
+            break
 
-        # Fallback pola yang lebih spesifik medis
-        if not patterns_norm:
-            fallback = [
-                "facial steaming", "steam therapy", "skin hydration", "pore dilation",
-                "dermatology steam", "cosmetic dermatology", "skin barrier function",
-                "terapi uap wajah", "hidrasi kulit", "perawatan wajah"
-            ]
-            patterns_norm = [p for p in fallback][:EXPANSION_MIN_TERMS]
+    if not patterns_norm:
+        patterns_norm = ["medical research", "clinical study", "health effects"][:EXPANSION_MIN_TERMS]
 
-        # Cache dan kembalikan
-        _save_to_cache(cache_key, patterns_norm)
-        return patterns_norm
-
-    except Exception as e:
-        print(f"[EXPAND] Peringatan: ekspansi pola gagal untuk klaim '{claim}': {e}")
-        # Fallback yang lebih baik untuk klaim medis
-        medical_fallback = [
-            "medical research", "clinical study", "dermatology", "skin care",
-            "health effects", "scientific evidence", "medical journal"
-        ]
-        patterns_norm = [p for p in medical_fallback][:EXPANSION_MIN_TERMS]
-        _EXPANSION_CACHE[claim_key] = {"patterns": patterns_norm, "ts": now}
-        return patterns_norm
+    return patterns_norm
     
 
 # -----------------------
@@ -510,9 +628,15 @@ def filter_by_relevance(claim: str, neighbors: List[Dict[str, Any]],
 # -----------------------
 
 def translate_text_gemini(text: str, target_lang: str = "English") -> str:
-    """Terjemahkan teks menggunakan Gemini API."""
-    if not text:
-        return ""
+    """Terjemahkan teks menggunakan Gemini API dengan cache."""
+    if not text or not gemini_client:
+        return text
+    
+    # Check cache first
+    if CACHE_ENABLED:
+        cached = cache.get_cached_translation(text, target_lang)
+        if cached:
+            return cached
     
     prompt = (
         f"Terjemahkan teks berikut ke bahasa {target_lang}. "
@@ -521,96 +645,55 @@ def translate_text_gemini(text: str, target_lang: str = "English") -> str:
     )
     
     try:
-        resp = client.models.generate_content(
-            model="gemini-2.5-flash-lite",
+        resp = gemini_client.models.generate_content(
+            model="gemini-2.0-flash-lite",
             contents=prompt,
             config={"temperature": 0.0, "max_output_tokens": 256}
         )
         txt = extract_text_from_model_resp(resp)
         txt = safe_strip(txt).replace("```", "")
-        return txt or text
+        result = txt or text
+        
+        # Cache the translation
+        if CACHE_ENABLED and result != text:
+            cache.cache_translation(text, target_lang, result)
+        
+        return result
     except Exception as e:
         print(f"[TERJEMAH] gagal: {e}")
         return text
 
-def generate_bilingual_queries(claim: str, langs: List[str] = ["English"]) -> List[str]:
-    """Generate variasi query dalam multiple bahasa dan sinonim yang lebih komprehensif."""
-    # Check cache first
-    cache_key = _get_cache_key(claim, "bilingual_queries")
-    cached = _load_from_cache(cache_key)
-    if cached:
-        print(f"[CACHE HIT] Using cached bilingual queries")
-        return cached
-    
+def generate_bilingual_queries(claim: str, langs: List[str] = ["English"], max_queries: int = 4) -> List[str]:
+    """Generate variasi query dalam multiple bahasa - PRIORITAS ENGLISH."""
     queries = []
     claim_clean = safe_strip(claim)
     
+    # PRIORITAS 1: Terjemahan ke English DULU (untuk jurnal internasional)
+    if gemini_client and langs:
+        for lang in langs[:1]:  # English translation first
+            try:
+                translated = translate_text_gemini(claim_clean, target_lang=lang)
+                translated = safe_strip(translated)
+                if translated and translated != claim_clean:
+                    queries.append(translated)  # English query FIRST
+                    print(f"[BILINGUAL] English query: {translated[:80]}...")
+                    break
+            except Exception as e:
+                print(f"[BILINGUAL] Translation failed: {e}")
+    
+    # PRIORITAS 2: Original query (Indonesian/other)
     if claim_clean:
         queries.append(claim_clean)
-
-    # Tambahkan terjemahan
-    for lang in langs:
-        try:
-            translated = translate_text_gemini(claim_clean, target_lang=lang)
-            translated = safe_strip(translated)
-            if translated and translated not in queries:
-                queries.append(translated)
-        except Exception:
-            pass
-
-    # Minta variasi yang lebih spesifik dari LLM
-    english_example = queries[1] if len(queries) > 1 else claim_clean
-    syn_prompt = (
-        f"Anda adalah research assistant medis. Berdasarkan klaim kesehatan ini, "
-        f"buat 4-6 variasi query pencarian akademik yang akan membantu menemukan "
-        f"penelitian ilmiah yang relevan, termasuk:\n"
-        f"- Istilah medis yang tepat\n"
-        f"- Mekanisme biologis yang terlibat\n"
-        f"- Studi klinis terkait\n"
-        f"- Efek fisiologis\n\n"
-        f"Klaim asli: {claim_clean}\n"
-        f"Klaim (English): {english_example}\n\n"
-        f"Kembalikan array JSON dengan query yang bervariasi dari umum ke spesifik.\n"
-        f"Contoh: [\"facial steaming benefits\", \"steam therapy dermatology\", \"skin hydration mechanisms\", \"pore dilation research\"]"
-    )
     
-    try:
-        resp = client.models.generate_content(
-            model="gemini-2.5-flash-lite",
-            contents=syn_prompt,
-            config={"temperature": 0.3, "max_output_tokens": 300}
-        )
-        txt = extract_text_from_model_resp(resp)
-        txt = safe_strip(txt)
-        
-        variations = []
-        try:
-            if txt:
-                variations = json.loads(txt)
-        except Exception:
-            # Tolerant fallback: pisah baris dan strip bullets
-            for line in (txt or "").splitlines():
-                line = line.strip().lstrip("-• ").strip()
-                if line:
-                    variations.append(line)
-        
-        for query in variations:
-            query_str = safe_strip(query)
-            if query_str and query_str not in queries:
-                queries.append(query_str)
-                
-    except Exception as e:
-        print(f"[GEN_QUERIES] gagal: {e}")
-
     # Dedupe dan batasi
     unique_queries = []
-    for q in queries:
+    for q in queries[:max_queries]:
         qn = safe_strip(q)
         if qn and qn not in unique_queries:
             unique_queries.append(qn)
     
-    _save_to_cache(cache_key, queries)
-    return queries
+    print(f"[BILINGUAL_QUERIES] Generated {len(unique_queries)} queries (English-first)")
+    return unique_queries
 
 def retrieve_with_expansion_bilingual(claim: str, k: int = 5, 
                                      expand_queries: bool = True, 
@@ -643,6 +726,22 @@ def retrieve_with_expansion_bilingual(claim: str, k: int = 5,
                 all_neighbors.append(nb)
 
     filtered = filter_by_relevance(claim, all_neighbors, min_relevance=0.25, debug=debug)
+    
+    # BOOST: Prioritaskan jurnal berbahasa Inggris (deteksi dari text)
+    for nb in filtered:
+        text = nb.get("text", "")
+        # Simple heuristic: jika text mengandung banyak kata Inggris umum, boost score
+        english_indicators = ["the", "and", "of", "in", "to", "a", "is", "that", "for", "with"]
+        english_count = sum(1 for word in english_indicators if f" {word} " in text.lower())
+        
+        if english_count >= 5:  # Likely English text
+            nb["relevance_score"] = nb.get("relevance_score", 0) * 1.3  # 30% boost
+            nb["_is_english"] = True
+            if debug:
+                print(f"[ENGLISH_BOOST] {nb.get('safe_id')} boosted (score: {nb['relevance_score']:.3f})")
+        else:
+            nb["_is_english"] = False
+    
     filtered.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
     return filtered[:k*3]
 
@@ -705,6 +804,47 @@ def load_fetched_file_to_items(path_or_obj):
                         "url": d.get("url", "") if d.get("url") else "", 
                         "doi": d.get("doi", "")
                     })
+            # ===== NEW SOURCES =====
+            elif name.startswith("europepmc") and p.suffix == ".json":
+                if hasattr(praw, 'parse_europepmc_file'):
+                    parsed = praw.parse_europepmc_file(p)
+                    for d in parsed:
+                        items.append({
+                            "title": d.get("title", ""), 
+                            "abstract": d.get("abstract", ""), 
+                            "url": d.get("url", "") if d.get("url") else "", 
+                            "doi": d.get("doi", "")
+                        })
+            elif name.startswith("openalex") and p.suffix == ".json":
+                if hasattr(praw, 'parse_openalex_file'):
+                    parsed = praw.parse_openalex_file(p)
+                    for d in parsed:
+                        items.append({
+                            "title": d.get("title", ""), 
+                            "abstract": d.get("abstract", ""), 
+                            "url": d.get("url", "") if d.get("url") else "", 
+                            "doi": d.get("doi", "")
+                        })
+            elif name.startswith("doaj") and p.suffix == ".json":
+                if hasattr(praw, 'parse_doaj_file'):
+                    parsed = praw.parse_doaj_file(p)
+                    for d in parsed:
+                        items.append({
+                            "title": d.get("title", ""), 
+                            "abstract": d.get("abstract", ""), 
+                            "url": d.get("url", "") if d.get("url") else "", 
+                            "doi": d.get("doi", "")
+                        })
+            elif name.startswith("arxiv") and p.suffix == ".json":
+                if hasattr(praw, 'parse_arxiv_file'):
+                    parsed = praw.parse_arxiv_file(p)
+                    for d in parsed:
+                        items.append({
+                            "title": d.get("title", ""), 
+                            "abstract": d.get("abstract", ""), 
+                            "url": d.get("url", "") if d.get("url") else "", 
+                            "doi": d.get("doi", "")
+                        })
             else:
                 try:
                     obj = json.loads(p.read_text(encoding="utf-8"))
@@ -786,26 +926,104 @@ def ingest_abstracts_as_chunks(selected_items: List[Dict[str, Any]]) -> bool:
         return False
 
 def dynamic_fetch_and_update(claim: str, max_fetch_results: int = 10, 
-                            top_k_select: int = 8) -> tuple:
-    """Fetch dokumen dari multiple sources dan pilih yang paling relevan."""
+                            top_k_select: int = 8, use_parallel: bool = True) -> tuple:
+    """Fetch dokumen dari multiple sources dan pilih yang paling relevan.
+    
+    Args:
+        claim: Klaim yang akan diverifikasi
+        max_fetch_results: Max results per source
+        top_k_select: Jumlah dokumen teratas yang dipilih
+        use_parallel: Gunakan parallel fetching (LEBIH CEPAT)
+    """
     print(f"[DYNAMIC_FETCH] Fetching untuk: {claim[:80]}...")
     fetched_paths = []
-
-    # Fetch dari multiple sources
-    sources = [
-        ("pubmed", lambda: fs.fetch_pubmed(claim, maximum_results=max_fetch_results)),
-        ("crossref", lambda: fs.fetch_crossref(claim, rows=max_fetch_results)),
-        ("semantic_scholar", lambda: fs.fetch_semantic_scholar(claim, limit=max_fetch_results))
-    ]
-
-    for source_name, fetch_func in sources:
+    
+    # PENTING: Terjemahkan ke English untuk fetch dari sumber internasional
+    english_claim = claim
+    if gemini_client:
         try:
-            result = fetch_func()
-            if result:
-                fetched_paths.append(result)
-            time.sleep(0.3)
+            english_claim = translate_text_gemini(claim, target_lang="English")
+            if english_claim and english_claim != claim:
+                print(f"[DYNAMIC_FETCH] English query: {english_claim[:80]}...")
         except Exception as e:
-            print(f"[DYNAMIC_FETCH] {source_name} gagal: {e}")
+            print(f"[DYNAMIC_FETCH] Translation failed: {e}, using original")
+            english_claim = claim
+
+    # ALL 7 available sources
+    ALL_SOURCES = [
+        "pubmed",           # Primary medical journals
+        "europepmc",        # PubMed + PMC + Preprints  
+        "openalex",         # Microsoft Academic replacement
+        "crossref",         # DOI metadata, international
+        "semantic_scholar", # AI-powered paper search
+        "doaj",             # Open Access Journals
+        "arxiv",            # Preprints (physics, CS, bio)
+    ]
+    
+    if use_parallel and hasattr(fs, 'fetch_sources_parallel'):
+        # ===== FAST PARALLEL MODE - BILINGUAL =====
+        print(f"[DYNAMIC_FETCH] Using PARALLEL mode with {len(ALL_SOURCES)} sources...")
+        
+        try:
+            # FETCH 1: English query untuk jurnal internasional
+            print(f"[DYNAMIC_FETCH] Fetching with ENGLISH query...")
+            parallel_results_en = fs.fetch_sources_parallel(
+                english_claim,
+                sources=ALL_SOURCES,
+                limit=max_fetch_results,
+                timeout=20
+            )
+            fetched_paths.extend(list(parallel_results_en.values()))
+            print(f"[DYNAMIC_FETCH] English fetch: {len(parallel_results_en)} sources")
+            
+            # FETCH 2: Indonesian query untuk jurnal lokal (jika berbeda)
+            if claim != english_claim:
+                print(f"[DYNAMIC_FETCH] Fetching with INDONESIAN query...")
+                parallel_results_id = fs.fetch_sources_parallel(
+                    claim,  # Original Indonesian
+                    sources=["crossref", "doaj", "openalex"],  # Sources with Indonesian content
+                    limit=max_fetch_results // 2,
+                    timeout=10
+                )
+                fetched_paths.extend(list(parallel_results_id.values()))
+                print(f"[DYNAMIC_FETCH] Indonesian fetch: {len(parallel_results_id)} sources")
+            
+            print(f"[DYNAMIC_FETCH] Total: {len(fetched_paths)} source files")
+        except Exception as e:
+            print(f"[DYNAMIC_FETCH] Parallel fetch gagal: {e}, fallback ke sequential")
+            use_parallel = False
+    
+    if not use_parallel or not fetched_paths:
+        # ===== SEQUENTIAL MODE (fallback) - BILINGUAL =====
+        print("[DYNAMIC_FETCH] Using SEQUENTIAL mode...")
+        
+        # English sources
+        sources_en = [
+            ("pubmed", lambda: fs.fetch_pubmed(english_claim, maximum_results=max_fetch_results)),
+            ("europepmc", lambda: fs.fetch_europe_pmc(english_claim, limit=max_fetch_results)),
+            ("openalex", lambda: fs.fetch_openalex(english_claim, limit=max_fetch_results)),
+            ("crossref", lambda: fs.fetch_crossref(english_claim, rows=max_fetch_results)),
+            ("semantic_scholar", lambda: fs.fetch_semantic_scholar(english_claim, limit=max_fetch_results)),
+            ("doaj", lambda: fs.fetch_doaj(english_claim, limit=max_fetch_results)),
+            ("arxiv", lambda: fs.fetch_arxiv(english_claim, limit=max_fetch_results)),
+        ]
+        
+        # Indonesian sources (if different query)
+        sources_id = []
+        if claim != english_claim:
+            sources_id = [
+                ("crossref_id", lambda: fs.fetch_crossref(claim, rows=max_fetch_results // 2)),
+                ("doaj_id", lambda: fs.fetch_doaj(claim, limit=max_fetch_results // 2)),
+            ]
+
+        for source_name, fetch_func in sources_en + sources_id:
+            try:
+                result = fetch_func()
+                if result:
+                    fetched_paths.append(result)
+                time.sleep(0.1)
+            except Exception as e:
+                print(f"[DYNAMIC_FETCH] {source_name} gagal: {e}")
 
     # Parse semua fetched items
     all_items = []
@@ -936,6 +1154,27 @@ def translate_snippets_if_needed(neighbors: List[Dict[str, Any]], target_lang="I
     
     return neighbors
 
+
+def convert_dynamic_to_neighbors(dynamic_selected: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Konversi hasil dynamic fetch ke format neighbors untuk LLM prompt."""
+    fallback_neighbors = []
+    for idx, s in enumerate(dynamic_selected, 1):
+        text = (s.get("title", "") + "\n\n" + s.get("abstract", "")).strip()
+        if text:
+            fallback_neighbors.append({
+                "doc_id": s.get("doi") or s.get("url") or f"dyn_{idx}",
+                "safe_id": s.get("doi") or s.get("url") or f"dyn_{idx}",
+                "source_file": "dynamic_fetch_fallback",
+                "chunk_index": 0,
+                "n_words": len(text.split()),
+                "text": text,
+                "doi": s.get("doi", ""),
+                "distance": None,
+                "relevance_score": 0.8
+            })
+    return fallback_neighbors
+
+
 # -----------------------
 # Fungsi prompt building dan LLM calling
 # -----------------------
@@ -986,67 +1225,105 @@ INSTRUKSI ANALISIS:
 OUTPUT FORMAT:
 {{
   "claim": "klaim asli",
-  "analysis": "analisis mendalam tentang mekanisme dan bukti",
+  "analysis": "analisis mendalam tentang mekanisme biologis, temuan penelitian utama, dan kualitas bukti yang tersedia",
   "label": "VALID/HOAX/PARTIALLY_VALID",
   "confidence": 0.0-1.0,
-  "conditions": "kondisi di mana klaim benar (jika PARTIALLY_VALID)",
+  "conditions": "kondisi spesifik di mana klaim dapat dianggap benar (jika PARTIALLY_VALID)",
   "evidence": [
-    {{"safe_id": "id_dokumen", "snippet": "kutipan yang mendukung/menolak", "relevance": "mengapa relevan"}}
+    {{"safe_id": "DOI atau ID dokumen", "snippet": "kutipan spesifik yang mendukung/menolak", "relevance": "alasan relevansi dengan mekanisme biologis"}}
   ],
-  "summary": "ringkasan kesimpulan yang seimbang"
+  "summary": "ringkasan komprehensif dengan kesimpulan berbasis bukti ilmiah, mencakup: (1) mekanisme biologis, (2) temuan kunci dari studi, (3) limitasi penelitian, (4) kesimpulan praktis"
 }}
 """
 
-def call_gemini(prompt: str, model: str = "gemini-2.5-flash-lite", 
-               temperature: float = 0.0, max_output_tokens: int = 2000,
-               use_cache: bool = True) -> str:
-    """Panggil Gemini API dengan caching untuk prompt yang sama."""
+def call_deepseek(prompt: str, model: str = None, 
+               temperature: float = 0.1, max_tokens: int = 3000) -> str:
+    """Panggil LLM API (Groq/DeepSeek/OpenRouter) untuk verifikasi klaim kesehatan.
     
-    # Generate cache key from prompt + config
-    if use_cache:
-        cache_key = _get_cache_key(
-            f"{prompt}|model={model}|temp={temperature}|max_tokens={max_output_tokens}",
-            prefix="gemini_verify"
-        )
-        cached = _load_from_cache(cache_key)
-        if cached:
-            print("[CACHE HIT] Using cached Gemini verification result", file=sys.stderr)
-            return cached
+    Provider dikonfigurasi via .env:
+    - LLM_PROVIDER=groq (default, gratis & cepat)
+    - LLM_PROVIDER=deepseek 
+    - LLM_PROVIDER=openrouter
+    """
+    # Use configured model if not specified
+    if model is None:
+        model = LLM_MODEL
     
-    models_to_try = [model, "gemini-2.5-flash", "gemini-2.0-flash"]
+    print(f"[LLM] Calling {LLM_PROVIDER.upper()} model: {model}", file=sys.stderr)
     
-    for m in models_to_try:
-        try:
-            resp = client.models.generate_content(
-                model=m,
-                contents=prompt,
-                config={
-                    "temperature": temperature,
-                    "max_output_tokens": max_output_tokens,
-                    "response_mime_type": "application/json",
-                    "candidate_count": 1
+    try:
+        response = llm_client.chat.completions.create(
+            model=model,
+            messages=[
+                {
+                    "role": "system", 
+                    "content": "You are an expert medical fact-checker with deep knowledge of evidence-based medicine, biomedical research methodology, and clinical practice. You analyze health claims rigorously using scientific literature and provide nuanced, balanced conclusions. Always respond in valid JSON format."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
                 }
-            )
-            text = extract_text_from_model_resp(resp)
-            text = safe_strip(text)
-            
-            if not text:
-                continue
-            
-            # Clean JSON fences
-            text = text.replace("```json", "").replace("```", "").strip()
-            
-            # Save to cache before returning
-            if use_cache:
-                _save_to_cache(cache_key, text)
-            
-            return text
-            
-        except Exception as e:
-            print(f"[DEBUG] call_gemini dengan model {m} gagal: {str(e)}")
-            continue
+            ],
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_format={"type": "json_object"} if LLM_PROVIDER != "groq" else None
+        )
+        
+        text = response.choices[0].message.content
+        text = safe_strip(text)
+        
+        if not text:
+            raise ValueError(f"{LLM_PROVIDER} returned empty response")
+        
+        # Clean JSON fences if present
+        text = text.replace("```json", "").replace("```", "").strip()
+        
+        print(f"[LLM] Response received ({len(text)} chars)", file=sys.stderr)
+        return text
+        
+    except Exception as e:
+        print(f"[ERROR] {LLM_PROVIDER} LLM failed: {str(e)}", file=sys.stderr)
+        print(f"[FALLBACK] Trying Gemini as backup LLM...", file=sys.stderr)
+        
+        # Fallback to Gemini
+        try:
+            return call_gemini_llm(prompt, temperature, max_tokens)
+        except Exception as gemini_error:
+            print(f"[ERROR] Gemini fallback also failed: {gemini_error}", file=sys.stderr)
+            raise RuntimeError(f"All LLM APIs failed. DeepSeek: {str(e)}, Gemini: {str(gemini_error)}")
+
+
+def call_gemini_llm(prompt: str, temperature: float = 0.1, max_tokens: int = 2500) -> str:
+    """
+    Fallback LLM menggunakan Gemini saat DeepSeek gagal.
+    """
+    if not gemini_client:
+        raise RuntimeError("Gemini client not available")
     
-    raise RuntimeError("Semua panggilan model Gemini gagal atau mengembalikan kosong.")
+    try:
+        system_prompt = "You are an expert medical fact-checker. Analyze health claims using scientific evidence. Always respond in valid JSON format with keys: label, confidence, summary, evidence."
+        full_prompt = f"{system_prompt}\n\n{prompt}"
+        
+        resp = gemini_client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=full_prompt,
+            config={
+                "temperature": temperature,
+                "max_output_tokens": max_tokens,
+                "response_mime_type": "application/json"
+            }
+        )
+        
+        text = resp.text.strip() if resp.text else ""
+        text = text.replace("```json", "").replace("```", "").strip()
+        
+        print(f"[GEMINI_LLM] Response received ({len(text)} chars)")
+        return text
+        
+    except Exception as e:
+        print(f"[ERROR] call_gemini_llm failed: {e}", file=sys.stderr)
+        raise
+
 
 def fix_common_json_issues(json_str: str) -> str:
     """Perbaiki masalah sintaks JSON yang umum."""
@@ -1250,19 +1527,40 @@ def build_frontend_payload(claim: str, parsed: Dict[str, Any], neighbors: List[D
 def verify_claim_local(claim: str, k: int = 5, dry_run: bool = False, 
                       enable_expansion: bool = True, min_relevance: float = 0.25,
                       force_dynamic_fetch: bool = False, 
-                      debug_retrieval: bool = False) -> Dict[str, Any]:
-    """Main verification flow - verifikasi klaim medis menggunakan RAG pipeline."""
-    print(f"[CACHE_STATS] {json.dumps(get_cache_stats())}", file=sys.stderr)
+                      debug_retrieval: bool = False,
+                      use_cache: bool = True) -> Dict[str, Any]:
+    """
+    MODIFIED: Database-first verification flow with caching.
+    
+    Flow:
+    1. Cek cache terlebih dahulu
+    2. Cek database lokal
+    3. Jika tidak ada hasil yang cukup relevan, baru fetch dari API
+    4. Verifikasi dengan LLM
+    5. Simpan hasil ke cache
+    """
     claim = safe_strip(claim)
     if not claim:
         raise ValueError("Klaim kosong.")
+    
+    # =============================
+    # STEP 0: CHECK CACHE
+    # =============================
+    if use_cache and CACHE_ENABLED and not dry_run:
+        cached_result = cache.get_cached_verification(claim)
+        if cached_result:
+            print("[0/6] ✅ CACHE HIT! Returning cached verification result.", file=sys.stderr)
+            return cached_result
 
-    # ✅ Check database availability
     if not db_available:
-        print("[WARNING] Database not available, verification may be limited", file=sys.stderr)
+        print("[WARNING] Database not available", file=sys.stderr)
 
     try:
-        print("[1/6] Mengambil dengan bilingual query expansion...", file=sys.stderr)
+        # =============================
+        # STEP 1: QUERY DATABASE LOKAL DULU
+        # =============================
+        print("[1/6] Mengambil dari database lokal...", file=sys.stderr)
+        
         if enable_expansion:
             neighbors = retrieve_with_expansion_bilingual(claim, k=k, expand_queries=True, debug=debug_retrieval)
         else:
@@ -1270,18 +1568,35 @@ def verify_claim_local(claim: str, k: int = 5, dry_run: bool = False,
             neighbors = retrieve_neighbors_from_db(emb, k=k, debug_print=debug_retrieval)
             neighbors = filter_by_relevance(claim, neighbors, min_relevance=min_relevance, debug=debug_retrieval)
 
-        # Memeriksa apakah perlu dynamic fetch
-        quality_need_fetch = force_dynamic_fetch or needs_dynamic_fetch(
-            neighbors, claim, min_relevance_mean=min_relevance, min_retriever_mean=0.25, debug=debug_retrieval
+        # =============================
+        # STEP 2: CEK KUALITAS HASIL DATABASE
+        # =============================
+        MIN_DOCS_REQUIRED = 5  # Minimal 5 dokumen untuk skip API fetch
+        
+        db_quality_sufficient = (
+            len(neighbors) >= MIN_DOCS_REQUIRED and 
+            not needs_dynamic_fetch(
+                neighbors, claim, 
+                min_relevance_mean=min_relevance, 
+                min_retriever_mean=0.25, 
+                debug=debug_retrieval
+            )
         )
-
-        dynamic_selected = None
-        if quality_need_fetch:
-            print("[2/6] Kualitas retrieval rendah atau tidak cukup. Mencoba dynamic fetch...", file=sys.stderr)
+        
+        if db_quality_sufficient:
+            print(f"[2/6] ✅ Database lokal memiliki {len(neighbors)} dokumen relevan. Skip API fetch.", file=sys.stderr)
+        else:
+            # Log alasan fetch
+            if len(neighbors) < MIN_DOCS_REQUIRED:
+                print(f"[2/6] ⚠️ Hanya {len(neighbors)} dokumen lokal (min: {MIN_DOCS_REQUIRED}). Fetching dari API eksternal...", file=sys.stderr)
+            else:
+                print("[2/6] ⚠️ Kualitas dokumen lokal tidak cukup. Fetching dari API eksternal...", file=sys.stderr)
+            
             try:
                 did_update, dynamic_selected = dynamic_fetch_and_update(claim, max_fetch_results=30, top_k_select=12)
+                
                 if did_update:
-                    print("[DYNAMIC_FETCH] Ingest dilakukan. Menunggu DB siap...", file=sys.stderr)
+                    print("[DYNAMIC_FETCH] Data baru di-ingest. Retry retrieval...", file=sys.stderr)
                     time.sleep(2.0)
                     
                     # Retry retrieval setelah ingest
@@ -1291,42 +1606,14 @@ def verify_claim_local(claim: str, k: int = 5, dry_run: bool = False,
                         emb = embed_texts_gemini([claim])[0]
                         neighbors = retrieve_neighbors_from_db(emb, k=k*2, debug_print=debug_retrieval)
                         neighbors = filter_by_relevance(claim, neighbors, min_relevance=min_relevance, debug=debug_retrieval)
-
-                    if debug_retrieval:
-                        print("\n[DEBUG] Neighbors setelah retry (top 6):", file=sys.stderr)
-                        for i, n in enumerate(neighbors[:6], 1):
-                            print(f"  [{i}] {n.get('safe_id')} rel={n.get('relevance_score',0):.3f} doi={n.get('doi','')}", file=sys.stderr)
-                            print(f"        snippet: {n.get('text','')[:200]}...\n", file=sys.stderr)
-
-                    # Menggunakan fetched items sebagai fallback jika masih tidak cukup
-                    if needs_dynamic_fetch(neighbors, claim, min_relevance_mean=min_relevance, 
-                                         min_retriever_mean=0.25, debug=debug_retrieval):
-                        print("[DYNAMIC_FETCH] Retry retrieval setelah dynamic fetch masih berkualitas rendah.", file=sys.stderr)
-                        if dynamic_selected:
-                            print("[DYNAMIC_FETCH] Menggunakan fetched items sebagai fallback context untuk LLM.", file=sys.stderr)
-                            fallback_neighbors = []
-                            for idx, s in enumerate(dynamic_selected, 1):
-                                text = (s.get("title", "") + "\n\n" + s.get("abstract", "")).strip()
-                                if text:
-                                    fallback_neighbors.append({
-                                        "doc_id": s.get("doi") or s.get("url") or f"dyn_{idx}",
-                                        "safe_id": s.get("doi") or s.get("url") or f"dyn_{idx}",
-                                        "source_file": "dynamic_fetch_fallback",
-                                        "chunk_index": 0,
-                                        "n_words": len(text.split()),
-                                        "text": text,
-                                        "doi": s.get("doi", ""),
-                                        "distance": None,
-                                        "relevance_score": 0.8
-                                    })
-                            neighbors = fallback_neighbors
-                        else:
-                            neighbors = []
-                else:
-                    print("[DYNAMIC_FETCH] Tidak ada items baru yang di-fetch atau ingest gagal.", file=sys.stderr)
+                    
+                    # Fallback ke dynamic_selected jika masih tidak cukup
+                    if not neighbors and dynamic_selected:
+                        print("[DYNAMIC_FETCH] Menggunakan fetched items sebagai fallback.", file=sys.stderr)
+                        neighbors = convert_dynamic_to_neighbors(dynamic_selected)
+                        
             except Exception as e:
                 print(f"[ERROR] Dynamic fetch gagal: {e}", file=sys.stderr)
-                traceback.print_exc(file=sys.stderr)
 
         # Handle kasus tidak ada neighbors
         if not neighbors:
@@ -1346,24 +1633,32 @@ def verify_claim_local(claim: str, k: int = 5, dry_run: bool = False,
 
         # Menerjemahkan snippets untuk LLM
         neighbors = translate_snippets_if_needed(neighbors, target_lang="Indonesian")
+        
+        # ✅ FILTER: Hanya gunakan paper akademik, buang berita/blog
+        print(f"[2.5/6] Filtering {len(neighbors)} neighbors untuk paper akademik...", file=sys.stderr)
+        neighbors_before_filter = len(neighbors)
+        neighbors = filter_academic_neighbors(neighbors)
+        neighbors_after_filter = len(neighbors)
+        print(f"[FILTER] Retained {neighbors_after_filter}/{neighbors_before_filter} academic papers", file=sys.stderr)
 
         if dry_run:
             print("\n=== DRY RUN: Neighbors ===", file=sys.stderr)
             for i, n in enumerate(neighbors, 1):
                 relevance = n.get('relevance_score', 0)
-                print(f"\n[{i}] {n.get('safe_id')} (relevansi: {relevance:.3f})", file=sys.stderr)
+                is_academic = n.get('_is_academic', False)
+                print(f"\n[{i}] {n.get('safe_id')} (relevansi: {relevance:.3f}, academic: {is_academic})", file=sys.stderr)
                 print(f"DOI: {n.get('doi', 'N/A')}", file=sys.stderr)
                 print(f"Text: {n.get('_text_translated', n.get('text',''))[:400]}...", file=sys.stderr)
             return {"dry_run_neighbors": neighbors}
 
-        print(f"[3/6] Membuat prompt dengan {len(neighbors)} neighbors yang relevan...", file=sys.stderr)
+        print(f"[3/6] Membuat prompt dengan {len(neighbors)} academic neighbors...", file=sys.stderr)
         prompt = build_prompt(claim, neighbors, max_context_chars=3500)
 
-        print("[4/6] Memanggil LLM untuk verifikasi...", file=sys.stderr)
+        print("[4/6] Memanggil DeepSeek untuk verifikasi...", file=sys.stderr)
         try:
-            raw_response = call_gemini(prompt, temperature=0.0, max_output_tokens=1600)
+            raw_response = call_deepseek(prompt, temperature=0.1, max_tokens=2500)
         except Exception as e:
-            print(f"[ERROR] call_gemini gagal: {e}", file=sys.stderr)
+            print(f"[ERROR] call_deepseek gagal: {e}", file=sys.stderr)
             traceback.print_exc(file=sys.stderr)
             raw_response = ""
 
@@ -1421,7 +1716,16 @@ def verify_claim_local(claim: str, k: int = 5, dry_run: bool = False,
         print("\n[JSON_OUTPUT]")
         print(json.dumps(frontend, ensure_ascii=False, indent=2))
         
-        return {"_frontend_payload": frontend}
+        # Save to cache
+        result = {"_frontend_payload": frontend}
+        if use_cache and CACHE_ENABLED:
+            try:
+                cache.cache_verification(claim, result)
+                print("[CACHE] ✅ Result cached for future use", file=sys.stderr)
+            except Exception as cache_err:
+                print(f"[CACHE] Warning: Failed to cache: {cache_err}", file=sys.stderr)
+        
+        return result
 
     except Exception as e:
         error_msg = f"Exception dalam verify_claim_local: {str(e)}"

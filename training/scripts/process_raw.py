@@ -200,6 +200,332 @@ def parse_pubmed_xml_file(file_path: pathlib.Path) -> List[Dict[str, Any]]:
     return parsed_documents
 
 
+def parse_google_books_file(file_path: pathlib.Path) -> List[Dict[str, Any]]:
+    """Parse file JSON Google Books dan extract informasi buku yang relevan."""
+    file_content = file_path.read_text(encoding="utf-8")
+    json_object = json.loads(file_content)
+
+    parsed_documents = []
+    items = json_object.get("items", [])
+
+    for item in items:
+        volume_info = item.get("volumeInfo", {})
+        
+        # Generate unique identifier
+        google_id = item.get("id", "")
+        document_identifier = google_id or str(hash(json.dumps(item, sort_keys=True)))
+
+        # Extract title
+        title_value = volume_info.get("title")
+
+        # Extract description (abstract)
+        abstract_value = volume_info.get("description", "")
+
+        # Extract authors
+        authors_list = volume_info.get("authors", [])
+        
+        # Extract publication year
+        year_value = None
+        published_date = volume_info.get("publishedDate", "")
+        if published_date:
+            try:
+                year_value = int(published_date.split("-")[0])
+            except (ValueError, IndexError):
+                pass
+
+        # Extract ISBN as alternative identifier
+        isbn_value = None
+        industry_identifiers = volume_info.get("industryIdentifiers", [])
+        for identifier in industry_identifiers:
+            if identifier.get("type") in ["ISBN_13", "ISBN_10"]:
+                isbn_value = identifier.get("identifier")
+                break
+
+        # Build structured document
+        parsed_document = {
+            "id": document_identifier,
+            "title": title_value,
+            "abstract": abstract_value,
+            "authors": authors_list,
+            "year": year_value,
+            "doi": None,  # Books typically don't have DOIs
+            "isbn": isbn_value,
+            "source": "google_books",
+            "raw_file": file_path.name
+        }
+        parsed_documents.append(parsed_document)
+    
+    return parsed_documents
+
+
+def parse_sciencedirect_file(file_path: pathlib.Path) -> List[Dict[str, Any]]:
+    """Parse file JSON ScienceDirect dan extract informasi artikel yang relevan."""
+    file_content = file_path.read_text(encoding="utf-8")
+    json_object = json.loads(file_content)
+
+    parsed_documents = []
+    
+    # ScienceDirect response structure
+    search_results = json_object.get("search-results", {})
+    entries = search_results.get("entry", [])
+
+    for entry in entries:
+        # Generate unique identifier
+        doi = entry.get("prism:doi", "")
+        pii = entry.get("pii", "")
+        document_identifier = doi or pii or str(hash(json.dumps(entry, sort_keys=True)))
+
+        # Extract title
+        title_value = entry.get("dc:title")
+
+        # Extract abstract
+        abstract_value = entry.get("dc:description", "")
+
+        # Extract authors
+        authors_list = []
+        authors_raw = entry.get("authors", {}).get("author", [])
+        if isinstance(authors_raw, list):
+            for author in authors_raw:
+                author_name = author.get("$", "") or author.get("authname", "")
+                if author_name:
+                    authors_list.append(author_name)
+        
+        # Extract publication year
+        year_value = None
+        cover_date = entry.get("prism:coverDate", "")
+        if cover_date:
+            try:
+                year_value = int(cover_date.split("-")[0])
+            except (ValueError, IndexError):
+                pass
+
+        # Build structured document
+        parsed_document = {
+            "id": document_identifier,
+            "title": title_value,
+            "abstract": abstract_value,
+            "authors": authors_list,
+            "year": year_value,
+            "doi": doi,
+            "source": "sciencedirect",
+            "raw_file": file_path.name
+        }
+        parsed_documents.append(parsed_document)
+    
+    return parsed_documents
+
+
+def parse_openlibrary_file(file_path: pathlib.Path) -> List[Dict[str, Any]]:
+    """Parse file JSON Open Library dan extract informasi buku yang relevan."""
+    file_content = file_path.read_text(encoding="utf-8")
+    json_object = json.loads(file_content)
+
+    parsed_documents = []
+    docs = json_object.get("docs", [])
+
+    for doc in docs:
+        # Generate unique identifier
+        key = doc.get("key", "")
+        document_identifier = key or str(hash(json.dumps(doc, sort_keys=True)))
+
+        # Extract title
+        title_value = doc.get("title")
+
+        # Extract first sentence or description
+        abstract_value = ""
+        if doc.get("first_sentence"):
+            abstract_value = " ".join(doc["first_sentence"]) if isinstance(doc["first_sentence"], list) else doc["first_sentence"]
+
+        # Extract authors
+        authors_list = doc.get("author_name", [])
+        
+        # Extract publication year
+        year_value = None
+        publish_year = doc.get("first_publish_year")
+        if publish_year:
+            try:
+                year_value = int(publish_year)
+            except (ValueError, TypeError):
+                pass
+
+        # Extract ISBN
+        isbn_value = None
+        isbns = doc.get("isbn", [])
+        if isbns:
+            isbn_value = isbns[0]
+
+        # Build structured document
+        parsed_document = {
+            "id": document_identifier,
+            "title": title_value,
+            "abstract": abstract_value,
+            "authors": authors_list,
+            "year": year_value,
+            "doi": None,  # Books typically don't have DOIs
+            "isbn": isbn_value,
+            "source": "openlibrary",
+            "raw_file": file_path.name
+        }
+        parsed_documents.append(parsed_document)
+    
+    return parsed_documents
+
+
+# ===========================
+# NEW SOURCE PARSERS
+# ===========================
+
+def parse_europepmc_file(file_path: pathlib.Path) -> List[Dict[str, Any]]:
+    """Parse file JSON Europe PMC."""
+    file_content = file_path.read_text(encoding="utf-8")
+    json_object = json.loads(file_content)
+    
+    results = json_object.get("resultList", {}).get("result", [])
+    parsed_documents = []
+    
+    for item in results:
+        doc_id = item.get("id") or item.get("pmid") or item.get("doi")
+        
+        # Extract authors
+        authors_list = []
+        for author in item.get("authorList", {}).get("author", []):
+            name = author.get("fullName", "")
+            if name:
+                authors_list.append(name)
+        
+        parsed_document = {
+            "id": doc_id,
+            "title": item.get("title", ""),
+            "abstract": item.get("abstractText", ""),
+            "authors": authors_list,
+            "year": item.get("pubYear"),
+            "doi": item.get("doi"),
+            "url": f"https://europepmc.org/article/{item.get('source', 'MED')}/{item.get('id', '')}",
+            "source": "europepmc",
+            "source_portal": "europepmc",
+            "raw_file": file_path.name
+        }
+        parsed_documents.append(parsed_document)
+    
+    return parsed_documents
+
+
+def parse_openalex_file(file_path: pathlib.Path) -> List[Dict[str, Any]]:
+    """Parse file JSON OpenAlex."""
+    file_content = file_path.read_text(encoding="utf-8")
+    json_object = json.loads(file_content)
+    
+    results = json_object.get("results", [])
+    parsed_documents = []
+    
+    for work in results:
+        # Get DOI
+        doi_url = work.get("doi", "")
+        doi = doi_url.replace("https://doi.org/", "") if doi_url else ""
+        
+        # Get authors
+        authors_list = []
+        for authorship in work.get("authorships", [])[:10]:
+            author = authorship.get("author", {})
+            name = author.get("display_name", "")
+            if name:
+                authors_list.append(name)
+        
+        parsed_document = {
+            "id": doi or work.get("id", ""),
+            "title": work.get("title", ""),
+            "abstract": work.get("abstract", ""),
+            "authors": authors_list,
+            "year": work.get("publication_year"),
+            "doi": doi,
+            "url": doi_url or work.get("id", ""),
+            "cited_by_count": work.get("cited_by_count", 0),
+            "is_oa": work.get("open_access", {}).get("is_oa", False),
+            "source": "openalex",
+            "source_portal": "openalex",
+            "raw_file": file_path.name
+        }
+        parsed_documents.append(parsed_document)
+    
+    return parsed_documents
+
+
+def parse_doaj_file(file_path: pathlib.Path) -> List[Dict[str, Any]]:
+    """Parse file JSON DOAJ."""
+    file_content = file_path.read_text(encoding="utf-8")
+    json_object = json.loads(file_content)
+    
+    results = json_object.get("results", [])
+    parsed_documents = []
+    
+    for item in results:
+        bibjson = item.get("bibjson", {})
+        
+        # Get DOI
+        doi = ""
+        for identifier in bibjson.get("identifier", []):
+            if identifier.get("type") == "doi":
+                doi = identifier.get("id", "")
+                break
+        
+        # Get authors
+        authors_list = [a.get("name", "") for a in bibjson.get("author", [])[:10] if a.get("name")]
+        
+        # Get URL
+        url = ""
+        for link in bibjson.get("link", []):
+            if link.get("type") == "fulltext":
+                url = link.get("url", "")
+                break
+        
+        parsed_document = {
+            "id": doi or item.get("id", ""),
+            "title": bibjson.get("title", ""),
+            "abstract": bibjson.get("abstract", ""),
+            "authors": authors_list,
+            "year": bibjson.get("year"),
+            "doi": doi,
+            "url": url or (f"https://doi.org/{doi}" if doi else ""),
+            "journal": bibjson.get("journal", {}).get("title", ""),
+            "source": "doaj",
+            "source_portal": "doaj",
+            "raw_file": file_path.name
+        }
+        parsed_documents.append(parsed_document)
+    
+    return parsed_documents
+
+
+def parse_arxiv_file(file_path: pathlib.Path) -> List[Dict[str, Any]]:
+    """Parse file JSON arXiv."""
+    file_content = file_path.read_text(encoding="utf-8")
+    json_object = json.loads(file_content)
+    
+    entries = json_object.get("entries", [])
+    parsed_documents = []
+    
+    for entry in entries:
+        url = entry.get("url", "")
+        arxiv_id = url.split("/")[-1] if url else ""
+        
+        parsed_document = {
+            "id": arxiv_id or url,
+            "title": entry.get("title", ""),
+            "abstract": entry.get("abstract", ""),
+            "authors": [],
+            "year": None,
+            "doi": None,
+            "url": url,
+            "source": "arxiv",
+            "source_portal": "arxiv",
+            "source_type": "preprint",
+            "raw_file": file_path.name
+        }
+        parsed_documents.append(parsed_document)
+    
+    return parsed_documents
+
+
 def save_document_as_json(document: Dict[str, Any], output_folder: pathlib.Path) -> pathlib.Path:
     """Simpan dokumen sebagai file JSON dengan nama file yang aman."""
     # Create safe filename from document ID
@@ -228,6 +554,21 @@ def determine_parser_for_file(file_path: pathlib.Path):
         return parse_semantic_scholar_file
     elif lower_case_name.startswith("pubmed") and file_path.suffix in [".xml"]:
         return parse_pubmed_xml_file
+    elif lower_case_name.startswith("google_books") and file_path.suffix == ".json":
+        return parse_google_books_file
+    elif lower_case_name.startswith("sciencedirect") and file_path.suffix == ".json":
+        return parse_sciencedirect_file
+    elif lower_case_name.startswith("openlibrary") and file_path.suffix == ".json":
+        return parse_openlibrary_file
+    # NEW SOURCES
+    elif lower_case_name.startswith("europepmc") and file_path.suffix == ".json":
+        return parse_europepmc_file
+    elif lower_case_name.startswith("openalex") and file_path.suffix == ".json":
+        return parse_openalex_file
+    elif lower_case_name.startswith("doaj") and file_path.suffix == ".json":
+        return parse_doaj_file
+    elif lower_case_name.startswith("arxiv") and file_path.suffix == ".json":
+        return parse_arxiv_file
     else:
         return None
 

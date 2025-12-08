@@ -471,6 +471,44 @@ def expand_relevance_patterns(claim: str, force_refresh: bool = False) -> List[s
         patterns_norm = ["medical research", "clinical study", "health effects"][:EXPANSION_MIN_TERMS]
 
     return patterns_norm
+
+
+def extract_xy_from_claim(claim: str) -> tuple[str, str]:
+    """Heuristik sederhana untuk mengekstrak X (penyebab) dan Y (akibat) dari klaim.
+
+    Contoh klaim yang didukung:
+    - "X menyebabkan Y"
+    - "X dapat menyebabkan Y"
+    - "X bisa menyebabkan Y"
+    - "X meningkatkan risiko Y"
+    - "X causes Y / X can cause Y / X may cause Y / X increases risk of Y"
+    """
+    claim_clean = safe_strip(claim).lower()
+    if not claim_clean:
+        return "", ""
+
+    separators = [
+        r"dapat menyebabkan",
+        r"bisa menyebabkan",
+        r"menyebabkan",
+        r"meningkatkan risiko",
+        r"meningkatkan resiko",
+        r"memicu",
+        r"mengakibatkan",
+        r"can cause",
+        r"may cause",
+        r"causes",
+        r"leads to",
+        r"increases risk of",
+    ]
+
+    for sep in separators:
+        parts = re.split(sep, claim_clean, maxsplit=1)
+        if len(parts) == 2:
+            x_raw, y_raw = parts[0].strip(" ,.-"), parts[1].strip(" ,.-")
+            return x_raw, y_raw
+
+    return "", ""
     
 
 # -----------------------
@@ -486,7 +524,7 @@ def compute_relevance_score(claim: str, neighbor_text: str, neighbor_title: str 
     claim_lower = safe_strip(claim).lower()
     text_lower = (safe_strip(neighbor_text) + " " + safe_strip(neighbor_title)).lower()
 
-    # Dapatkan pola yang dihasilkan LLM (dari cache)
+    # Dapatkan pola keyword umum dari klaim
     try:
         patterns = expand_relevance_patterns(claim)
     except Exception:
@@ -512,10 +550,46 @@ def compute_relevance_score(claim: str, neighbor_text: str, neighbor_title: str 
                 hit_count += 1
 
     score = hit_count / max(len(patterns), 1)
-    
+
     # Soft cap & smoothing: jika sangat sedikit pola yang cocok tapi teks berisi token klaim, tingkatkan sedikit
     if score < 0.2 and any(tok for tok in re.findall(r"[A-Za-z0-9À-ÿ]{3,}", claim_lower) if tok in text_lower):
         score = min(score + 0.15, 1.0)
+
+    # ==========================
+    # Heuristik khusus X → Y
+    # ==========================
+    # Jika klaim punya bentuk sebab-akibat yang jelas, prioritaskan dokumen
+    # yang menyebut X dan Y sekaligus. Turunkan prioritas jika hanya Y tanpa X.
+    try:
+        x_raw, y_raw = extract_xy_from_claim(claim)
+    except Exception:
+        x_raw, y_raw = "", ""
+
+    if x_raw or y_raw:
+        def _tokens(s: str) -> List[str]:
+            return [t for t in re.split(r"[^a-z0-9À-ÿ]+", s.lower()) if len(t) > 3]
+
+        x_tokens = _tokens(x_raw)
+        y_tokens = _tokens(y_raw)
+
+        def _has_tokens(tokens: List[str]) -> bool:
+            return any(re.search(r"\\b" + re.escape(tok) + r"\\b", text_lower) for tok in tokens)
+
+        has_x = _has_tokens(x_tokens) if x_tokens else False
+        has_y = _has_tokens(y_tokens) if y_tokens else False
+
+        if has_x and has_y:
+            # Dokumen eksplisit membahas X dan Y -> kuatkan skor
+            score = min(score * 1.5 + 0.2, 1.0)
+        elif has_y and not has_x:
+            # Hanya bicara Y tanpa X -> turunkan prioritas tapi tetap bisa muncul
+            score = min(score * 0.4, 0.5)
+        elif has_x and not has_y:
+            # Hanya bicara X (penyebab) tanpa akibat Y -> relevan tapi lemah
+            score = min(score * 0.6, 0.6)
+        else:
+            # Tidak jelas menyebut X maupun Y spesifik -> biarkan skor apa adanya
+            pass
 
     return float(max(0.0, min(1.0, score)))
 

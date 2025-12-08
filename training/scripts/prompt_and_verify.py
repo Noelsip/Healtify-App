@@ -400,6 +400,22 @@ def safe_strip(s) -> str:
     except Exception:
         return ""
 
+
+def safe_float(value, default: float = 0.0) -> float:
+    """Konversi ke float dengan aman; fallback ke default jika gagal."""
+    try:
+        if value is None:
+            return float(default)
+        if isinstance(value, (int, float)):
+            return float(value)
+        s = str(value).strip()
+        return float(s)
+    except Exception:
+        try:
+            return float(default)
+        except Exception:
+            return 0.0
+
 # -----------------------
 # Ekspansi pola berbasis LLM
 # -----------------------
@@ -1626,7 +1642,10 @@ def build_frontend_payload(claim: str, parsed: Dict[str, Any], neighbors: List[D
             "source_snippet": safe_strip(nb.get("_text_translated") or nb.get("text", ""))[:400],
             "doi": doi_val,
             "url": url_val,
-            "relevance_score": float(ev.get("relevance_score", ev.get("relevance", nb.get("relevance_score", 0.0))))
+            "relevance_score": safe_float(
+                ev.get("relevance_score", ev.get("relevance", nb.get("relevance_score", 0.0))),
+                default=nb.get("relevance_score", 0.0) or 0.0,
+            ),
         }
         frontend_evidence.append(evidence_item)
         

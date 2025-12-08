@@ -36,6 +36,21 @@ SIMPLE_CLAIM_WORD_THRESHOLD = 20
 _optimized_module = None
 _original_module = None
 
+def safe_float(value, default: float = 0.0) -> float:
+    """Konversi ke float dengan aman; fallback ke default jika gagal."""
+    try:
+        if value is None:
+            return float(default)
+        if isinstance(value, (int, float)):
+            return float(value)
+        s = str(value).strip()
+        return float(s)
+    except Exception:
+        try:
+            return float(default)
+        except Exception:
+            return 0.0
+
 # ===========================
 # Helper Functions
 # ===========================
@@ -48,7 +63,7 @@ def normalize_claim_text(text: str) -> str:
 
 def is_health_related_claim(claim_text: str, summary: str = "") -> bool:
     """
-    ✅ IMPROVED: Deteksi health-related dengan support BILINGUAL.
+    IMPROVED: Deteksi health-related dengan support BILINGUAL.
     """
     # Expanded keywords - lebih comprehensive
     health_keywords_id = {
@@ -58,7 +73,7 @@ def is_health_related_claim(claim_text: str, summary: str = "") -> bool:
         'imun', 'infeksi', 'virus', 'bakteri', 'gejala', 'diagnosa',
         'vaksin', 'antibiotik', 'herbal', 'suplemen', 'olahraga',
         'tidur', 'stress', 'mental', 'depresi', 'kecemasan',
-        'merokok', 'rokok', 'tembakau', 'paru', 'asap'  # ✅ TAMBAHAN
+        'merokok', 'rokok', 'tembakau', 'paru', 'asap'  # TAMBAHAN
     }
     
     health_keywords_en = {
@@ -68,7 +83,7 @@ def is_health_related_claim(claim_text: str, summary: str = "") -> bool:
         'infection', 'virus', 'bacteria', 'symptom', 'diagnosis',
         'vaccine', 'antibiotic', 'supplement', 'exercise',
         'sleep', 'stress', 'mental', 'depression', 'anxiety',
-        'smoking', 'cigarette', 'tobacco', 'lung', 'smoke'  # ✅ TAMBAHAN
+        'smoking', 'cigarette', 'tobacco', 'lung', 'smoke'  # TAMBAHAN
     }
     
     # Medical patterns untuk deteksi lebih luas
@@ -92,7 +107,7 @@ def is_health_related_claim(claim_text: str, summary: str = "") -> bool:
     
     total_matches = keyword_matches + pattern_matches
     
-    # ✅ LOWER threshold - lebih permissive
+    # LOWER threshold - lebih permissive
     is_health = total_matches >= 1  # Changed from 2 to 1
     
     logger.info(f"[HEALTH_CHECK] Keywords: {keyword_matches}, Patterns: {pattern_matches}, Is Health: {is_health}")
@@ -181,7 +196,7 @@ def map_ai_label_to_backend(ai_label: str) -> str:
 
 def normalize_ai_response(ai_result: Dict[str, Any], claim_text: str = "") -> Dict[str, Any]:
     """
-    ✅ FIXED: Normalisasi response dengan logging detail.
+    FIXED: Normalisasi response dengan logging detail.
     """
     raw_label = ai_result.get('label', 'unverified')
     confidence_raw = ai_result.get('confidence', 0)
@@ -214,13 +229,13 @@ def normalize_ai_response(ai_result: Dict[str, Any], claim_text: str = "") -> Di
     logger.info(f"[NORMALIZE] Raw label: {raw_label} (mapped: {mapped_label}), Confidence: {confidence:.2f}")
     logger.info(f"[NORMALIZE] Has journal: {has_journal}, Total sources: {len(sources)}")
     
-    # 🔹 Jika AI sudah sangat yakin bahwa klaim adalah HOAX, jangan dibalik menjadi VALID
+    # Jika AI sudah sangat yakin bahwa klaim adalah HOAX, jangan dibalik menjadi VALID
     if mapped_label == 'hoax':
         final_label = 'hoax'
         final_confidence = confidence
         logger.info("[NORMALIZE] Final label forced to HOAX based on AI raw label")
     else:
-        # ✅ Determine final label dengan improved logic (termasuk heuristic merokok-kanker)
+        # Determine final label dengan improved logic (termasuk heuristic merokok-kanker)
         final_label = determine_verification_label(
             confidence_score=confidence,
             has_sources=bool(sources),
@@ -229,10 +244,10 @@ def normalize_ai_response(ai_result: Dict[str, Any], claim_text: str = "") -> Di
             summary=combined_summary
         )
 
-        # ✅ IMPORTANT: Jika label unverified, set confidence ke None
+        # IMPORTANT: Jika label unverified, set confidence ke None
         final_confidence = confidence if final_label != 'unverified' else None
     
-    logger.info(f"[NORMALIZE] ✅ Final: label={final_label}, confidence={final_confidence}")
+    logger.info(f"[NORMALIZE] Final: label={final_label}, confidence={final_confidence}")
     
     return {
         'label': final_label,
@@ -290,10 +305,9 @@ def extract_sources(result: Dict[str, Any]) -> List[Dict[str, Any]]:
             "title": raw_title,
             "doi": doi,
             "url": url or (f"https://doi.org/{doi}" if doi else ""),
-            "relevance_score": float(
-                src.get("relevance_score", 0)
-                or src.get("relevance", 0) 
-                or 0
+            "relevance_score": safe_float(
+                src.get("relevance_score", src.get("relevance", 0.0)),
+                default=0.0,
             ),
             "excerpt": excerpt,
             "source_type": src.get("source_type", "journal"),

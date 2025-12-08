@@ -1625,7 +1625,7 @@ def build_frontend_payload(claim: str, parsed: Dict[str, Any], neighbors: List[D
             doi_normalized = re.sub(r'^(urn:doi:|doi:)\s*', '', doi_val, flags=re.I)
             url_val = f"https://doi.org/{doi_normalized}"
         else:
-            url_val = safe_strip(nb.get("source_url") or nb.get("source") or nb.get("source_file") or "")
+            url_val = ""
         
         # Preferensi konten ringkasan dari LLM jika tersedia
         ev_summary = safe_strip(ev.get("summary") or "")
@@ -1668,9 +1668,7 @@ def build_frontend_payload(claim: str, parsed: Dict[str, Any], neighbors: List[D
         for n in neighbors[:6]:
             safe_id = n.get("safe_id") or n.get("doc_id") or ""
             doi_val = safe_strip(n.get("doi", "") or "")
-            url_val = f"https://doi.org/{doi_val}" if doi_val else safe_strip(
-                n.get("source_url") or n.get("source") or n.get("source_file") or ""
-            )
+            url_val = f"https://doi.org/{doi_val}" if doi_val else ""
             
             frontend_evidence.append({
                 "safe_id": safe_id,

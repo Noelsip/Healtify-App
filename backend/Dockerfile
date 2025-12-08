@@ -15,9 +15,11 @@ RUN apt-get update && apt-get install -y \
 
 # Copy backend requirements
 COPY backend/requirements.txt /app/backend/requirements.txt
+COPY training/requirements.txt /app/training/requirements.txt
 
 # Install Python packages
-RUN pip install --no-cache-dir -r /app/backend/requirements.txt
+RUN pip install --no-cache-dir -r /app/backend/requirements.txt \
+    && pip install --no-cache-dir -r /app/training/requirements.txt
 
 # Copy backend code
 COPY backend/ /app/backend/

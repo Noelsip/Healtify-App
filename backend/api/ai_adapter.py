@@ -5,6 +5,7 @@ import subprocess
 import hashlib
 import time
 import logging
+import requests
 import re
 from pathlib import Path
 from typing import Dict, Any, Optional, List
@@ -50,6 +51,23 @@ def safe_float(value, default: float = 0.0) -> float:
             return float(default)
         except Exception:
             return 0.0
+
+def validate_url(url: str, timeout: float = 3.0) -> str:
+    """Cek cepat apakah URL sumber tampak valid. Jika 404/5xx, kembalikan string kosong."""
+    if not url:
+        return ""
+    try:
+        resp = requests.head(url, allow_redirects=True, timeout=timeout)
+        status = resp.status_code
+
+        if status in (404, 410) or status >= 500:
+            logger.info(f"Dropping unreachable source URL {url} (status={status})")
+            return ""
+
+        return resp.url or url
+    except Exception as e:
+        logger.debug(f"validate_url HEAD failed for {url}: {e}")
+        return url
 
 # ===========================
 # Helper Functions
@@ -288,12 +306,16 @@ def extract_sources(result: Dict[str, Any]) -> List[Dict[str, Any]]:
         doi = (src.get("doi") or "").strip()
         url = (src.get("url") or "").strip()
         safe_id = (src.get("safe_id") or "").strip()
+
+        # Jika tidak ada DOI, lakukan cek ringan untuk menghindari link yang jelas-jelas 404/5xx
+        if not doi and url:
+            url = validate_url(url)
         
         # Minimal identifier supaya bisa dilacak di frontend / database
         identifier = doi or url or safe_id
         if not identifier:
             continue
-
+        
         raw_title = src.get("title") or safe_id or "Unknown"
         snippet = (src.get("snippet") or src.get("text") or "").strip()
         if raw_title == "Unknown" and snippet:
@@ -304,7 +326,7 @@ def extract_sources(result: Dict[str, Any]) -> List[Dict[str, Any]]:
         source_obj = {
             "title": raw_title,
             "doi": doi,
-            "url": url or (f"https://doi.org/{doi}" if doi else ""),
+            "url": (f"https://doi.org/{doi}" if doi else url),
             "relevance_score": safe_float(
                 src.get("relevance_score", src.get("relevance", 0.0)),
                 default=0.0,

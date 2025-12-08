@@ -334,10 +334,11 @@ db_available = check_database_connection()
 
 # Konstanta konfigurasi
 PROMPT_HEADER = """
-Anda adalah sistem verifikasi fakta medis yang teliti. Tugas Anda:
-1) Nilai apakah klaim ini benar, salah, atau sebagian benar tergantung konteks medis.
-2) Jika klaim sebagian benar, jelaskan kondisi atau batasan di mana klaim tersebut bisa benar.
-3) Output JSON dengan fields: claim, analysis, label (VALID/HOAX/PARTIALLY_VALID), confidence (0-1), evidence (list), summary.
+Anda adalah sistem verifikasi fakta medis berbasis jurnal ilmiah. Tugas Anda adalah menilai apakah sebuah klaim kesehatan benar, salah, atau sebagian benar berdasarkan bukti ilmiah yang secara langsung membahas hubungan X → Y dalam klaim tersebut.
+
+X = faktor penyebab atau perilaku.
+Y = dampak atau kondisi medis.
+Fokuskan seluruh analisis pada hubungan kausal X → Y, bukan pembahasan umum tentang Y saja.
 """
 
 LLM_CONF_THRESHOLD = 0.75
@@ -1053,7 +1054,7 @@ def dynamic_fetch_and_update(claim: str, max_fetch_results: int = 10,
         print("[DYNAMIC_FETCH] Tidak ada candidate texts untuk di-embed.")
         return False, []
 
-    # Pilih items paling relevan menggunakan cosine similarity
+    # Pilih items paling relevan menggunakan kombinasi cosine similarity + skor relevansi klaim
     try:
         claim_vec = embed_texts_gemini([claim])[0]
         candidate_vecs = embed_texts_gemini(candidate_texts)
@@ -1062,10 +1063,43 @@ def dynamic_fetch_and_update(claim: str, max_fetch_results: int = 10,
         return False, []
 
     similarities = [safe_cosine_similarity(claim_vec, v) for v in candidate_vecs]
-    idx_sorted = sorted(range(len(similarities)), key=lambda i: similarities[i], reverse=True)[:top_k_select]
-    selected = [candidate_meta[i] for i in idx_sorted]
 
-    print(f"[DYNAMIC_FETCH] Terpilih {len(selected)} items (top sims: {[round(similarities[i], 3) for i in idx_sorted[:5]]})")
+    # Hitung skor relevansi berbasis keyword untuk setiap kandidat, lalu gabungkan
+    scored = []
+    for i, meta in enumerate(candidate_meta):
+        title = meta.get("title", "")
+        abstract = meta.get("abstract", "") or ""
+        full_text = (title + "\n\n" + abstract).strip()
+
+        rel_score = compute_relevance_score(claim, full_text, title)
+        sim_score = similarities[i] if i < len(similarities) else 0.0
+        combined = 0.6 * float(sim_score) + 0.4 * float(rel_score)
+
+        scored.append({
+            "idx": i,
+            "sim": float(sim_score),
+            "rel": float(rel_score),
+            "combined": float(combined),
+        })
+
+    # Urutkan berdasarkan skor gabungan (paling relevan di atas)
+    scored.sort(key=lambda x: x["combined"], reverse=True)
+
+    # Buang kandidat yang sangat tidak relevan dengan klaim (combined terlalu rendah)
+    MIN_COMBINED = 0.25
+    top_scored = [s for s in scored if s["combined"] >= MIN_COMBINED][:top_k_select]
+
+    # Jika semua skor di bawah threshold, tetap ambil beberapa teratas agar pipeline tetap jalan
+    if not top_scored:
+        top_scored = scored[:top_k_select]
+
+    selected_indices = [s["idx"] for s in top_scored]
+    selected = [candidate_meta[i] for i in selected_indices]
+
+    print(
+        f"[DYNAMIC_FETCH] Terpilih {len(selected)} items "
+        f"(top combined: {[round(s['combined'], 3) for s in top_scored[:5]]})"
+    )
 
     # Normalisasi selected items
     normalized_selected = []
@@ -1155,12 +1189,13 @@ def translate_snippets_if_needed(neighbors: List[Dict[str, Any]], target_lang="I
     return neighbors
 
 
-def convert_dynamic_to_neighbors(dynamic_selected: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def convert_dynamic_to_neighbors(dynamic_selected: List[Dict[str, Any]], claim: str) -> List[Dict[str, Any]]:
     """Konversi hasil dynamic fetch ke format neighbors untuk LLM prompt."""
     fallback_neighbors = []
     for idx, s in enumerate(dynamic_selected, 1):
-        text = (s.get("title", "") + "\n\n" + s.get("abstract", "")).strip()
+        text = (s.get("title", "") + "\n\n" + (s.get("abstract", "") or "")).strip()
         if text:
+            rel_score = compute_relevance_score(claim, text, s.get("title", ""))
             fallback_neighbors.append({
                 "doc_id": s.get("doi") or s.get("url") or f"dyn_{idx}",
                 "safe_id": s.get("doi") or s.get("url") or f"dyn_{idx}",
@@ -1170,7 +1205,7 @@ def convert_dynamic_to_neighbors(dynamic_selected: List[Dict[str, Any]]) -> List
                 "text": text,
                 "doi": s.get("doi", ""),
                 "distance": None,
-                "relevance_score": 0.8
+                "relevance_score": float(rel_score),
             })
     return fallback_neighbors
 
@@ -1215,25 +1250,60 @@ KLAIM:
 BUKTI ILMIAH:
 {context_block}
 
-INSTRUKSI ANALISIS:
-- Evaluasi bukti secara menyeluruh dan objektif
-- Pertimbangkan mekanisme biologis yang mendasari klaim
-- Identifikasi kondisi atau batasan di mana klaim mungkin benar
-- Jika ada konflik dalam bukti, jelaskan nuansanya
-- Berikan analisis berdasarkan evidence-based medicine
+INSTRUKSI ANALISIS (IKUTI LANGKAH BERIKUT DAN JANGAN LEWATKAN TAHAP APA PUN):
+
+1. Ekstraksi Struktur Klaim:
+   - Identifikasi X = faktor penyebab / perilaku utama dalam klaim.
+   - Identifikasi Y = dampak / kondisi medis dalam klaim.
+   - Fokuskan seluruh analisis pada hubungan kausal X → Y, bukan pembahasan Y secara umum.
+
+2. Validasi Evidence:
+   - Gunakan hanya sumber yang secara eksplisit meneliti hubungan X → Y.
+   - Abaikan sumber yang hanya membahas Y tanpa menguji pengaruh X.
+   - Jika tidak ada bukti langsung untuk X → Y, jelaskan keterbatasan tersebut secara eksplisit.
+
+3. Analisis Kausalitas:
+   - Jelaskan apakah ada bukti kuat bahwa X menyebabkan atau meningkatkan risiko Y.
+   - Jelaskan jika ada bukti yang membantah hubungan X → Y.
+   - Jelaskan jika bukti masih terbatas, tidak langsung, atau hanya observasional.
+
+4. Penetapan Label (pilih hanya satu):
+   - VALID: hubungan X → Y didukung kuat oleh penelitian ilmiah.
+   - HOAX: penelitian menunjukkan X tidak menyebabkan Y atau klaim menyesatkan.
+   - PARTIALLY_VALID: hubungan X → Y hanya benar pada kondisi tertentu, risikonya meningkat tetapi tidak langsung menyebabkan Y, atau bukti tidak cukup kuat.
+
+5. Penetapan Confidence:
+   - High (0.75–1.0): banyak bukti langsung dan konsisten.
+   - Medium (0.45–0.74): ada sebagian bukti, tetapi tidak konsisten atau terbatas.
+   - Low (0.20–0.44): bukti sangat terbatas atau tidak langsung.
+   - Konversikan tingkat keyakinan tersebut ke angka 0.0–1.0 pada field "confidence".
+
+6. Buat Summary:
+   - Maksimal 100–130 kata.
+   - Ringkas, berbasis bukti, tidak ambigu.
+   - Fokus pada hubungan X → Y dan bukan edukasi umum yang tidak relevan.
+
+7. Output JSON:
+   - Gunakan format berikut dan JANGAN tambahkan teks di luar JSON.
 
 OUTPUT FORMAT:
 {{
   "claim": "klaim asli",
-  "analysis": "analisis mendalam tentang mekanisme biologis, temuan penelitian utama, dan kualitas bukti yang tersedia",
-  "label": "VALID/HOAX/PARTIALLY_VALID",
-  "confidence": 0.0-1.0,
-  "conditions": "kondisi spesifik di mana klaim dapat dianggap benar (jika PARTIALLY_VALID)",
+  "analysis": "penjelasan terstruktur tentang bagaimana bukti mendukung/menolak hubungan X → Y",
+  "label": "VALID" | "HOAX" | "PARTIALLY_VALID",
+  "confidence": 0.0,
   "evidence": [
-    {{"safe_id": "DOI atau ID dokumen", "snippet": "kutipan spesifik yang mendukung/menolak", "relevance": "alasan relevansi dengan mekanisme biologis"}}
+    {{
+      "safe_id": "ID atau DOI bukti yang digunakan (opsional, gunakan jika diketahui dari bagian BUKTI ILMIAH)",
+      "title": "judul studi utama yang paling relevan",
+      "relevance": "penjelasan singkat kenapa studi ini relevan dengan hubungan X → Y",
+      "summary": "ringkasan 1–3 kalimat tentang temuan utama studi terkait X → Y"
+    }}
   ],
-  "summary": "ringkasan komprehensif dengan kesimpulan berbasis bukti ilmiah, mencakup: (1) mekanisme biologis, (2) temuan kunci dari studi, (3) limitasi penelitian, (4) kesimpulan praktis"
+  "summary": "ringkasan 100–130 kata yang menjelaskan secara singkat apakah klaim X → Y valid, hoax, atau sebagian benar dan mengapa."
 }}
+
+Pastikan analisis konsisten, tidak kontradiktif, dan tidak mengubah label (VALID/HOAX/PARTIALLY_VALID) di tengah penjelasan.
 """
 
 def call_deepseek(prompt: str, model: str = None, 
@@ -1467,13 +1537,22 @@ def build_frontend_payload(claim: str, parsed: Dict[str, Any], neighbors: List[D
         else:
             url_val = safe_strip(nb.get("source_url") or nb.get("source") or nb.get("source_file") or "")
         
+        # Preferensi konten ringkasan dari LLM jika tersedia
+        ev_summary = safe_strip(ev.get("summary") or "")
+        ev_snippet = safe_strip(ev.get("snippet") or ev.get("text") or "")
+        base_snippet = ev_summary or ev_snippet or safe_strip(nb.get("text", ""))
+
+        # Judul untuk evidence / sources
+        title_val = safe_strip(ev.get("title") or nb.get("title", "") or safe_id)
+
         evidence_item = {
             "safe_id": safe_id,
-            "snippet": safe_strip(ev.get("snippet") or ev.get("text") or nb.get("text", ""))[:400],
+            "title": title_val,
+            "snippet": base_snippet[:400],
             "source_snippet": safe_strip(nb.get("_text_translated") or nb.get("text", ""))[:400],
             "doi": doi_val,
             "url": url_val,
-            "relevance_score": float(ev.get("relevance_score", nb.get("relevance_score", 0.0)))
+            "relevance_score": float(ev.get("relevance_score", ev.get("relevance", nb.get("relevance_score", 0.0))))
         }
         frontend_evidence.append(evidence_item)
         
@@ -1610,7 +1689,8 @@ def verify_claim_local(claim: str, k: int = 5, dry_run: bool = False,
                     # Fallback ke dynamic_selected jika masih tidak cukup
                     if not neighbors and dynamic_selected:
                         print("[DYNAMIC_FETCH] Menggunakan fetched items sebagai fallback.", file=sys.stderr)
-                        neighbors = convert_dynamic_to_neighbors(dynamic_selected)
+                        neighbors = convert_dynamic_to_neighbors(dynamic_selected, claim)
+                        neighbors = filter_by_relevance(claim, neighbors, min_relevance=min_relevance, debug=debug_retrieval)
                         
             except Exception as e:
                 print(f"[ERROR] Dynamic fetch gagal: {e}", file=sys.stderr)

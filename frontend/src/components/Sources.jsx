@@ -8,7 +8,7 @@ import elsevierLogo from '../assets/elsevier.png';
 import openalexLogo from '../assets/openalex.png';
 import europepmcLogo from '../assets/europepmc.png';
 import doajLogo from '../assets/doaj2.png';
-import arxivLogo from '../assets/Arxiv.png';
+import arxivLogo from '../assets/ArXiv.png';
 
 const Sources = () => {
     const { t } = useTranslation();

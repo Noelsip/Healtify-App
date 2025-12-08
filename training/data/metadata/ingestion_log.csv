@@ -1205,3 +1205,10 @@ Supporting URL: https://www.nature.com/articles/s41591-024-1212",,no results,No 
 2025-12-07T14:44:05.075009+00:00,crossref,jamur diselangkangan disebabkan oleh celana dalam yang basah,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_jamur_diselangkangan_disebabkan_oleh_celana_dalam_yang_basah_1765118645.json,success,30 articles retrieved.
 2025-12-07T14:44:05.715682+00:00,arxiv,jamur diselangkangan disebabkan oleh celana dalam yang basah,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\arxiv_jamur_diselangkangan_disebabkan_oleh_celana_dalam_yang_basah_1765118645.json,success,20 entries
 2025-12-07T14:44:14.013618+00:00,semantic_scholar,jamur diselangkangan disebabkan oleh celana dalam yang basah,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\semantic_scholar_jamur_diselangkangan_disebabkan_oleh_celana_dalam_yang_basah_1765118654.json,success,"search_returned:30, details_returned:0"
+2025-12-08T03:06:38.784324+00:00,doaj,kemandulan,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\doaj_kemandulan_1765163198.json,success,5 articles
+2025-12-08T03:06:39.168059+00:00,arxiv,kemandulan,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\arxiv_kemandulan_1765163199.json,success,0 entries
+2025-12-08T03:06:39.168059+00:00,europepmc,kemandulan,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\europepmc_kemandulan_1765163199.json,success,0 hits
+2025-12-08T03:06:39.240863+00:00,openalex,kemandulan,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\openalex_kemandulan_1765163199.json,success,0 works
+2025-12-08T03:06:39.263211+00:00,pubmed,kemandulan,,no results,No articles found for the given query.
+2025-12-08T03:06:39.488967+00:00,crossref,kemandulan,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\crossref_kemandulan_1765163199.json,success,8 articles retrieved.
+2025-12-08T03:06:43.649305+00:00,semantic_scholar,kemandulan,C:\MyFolder\ProjekTipis\healtify-app\training\data\raw\semantic_scholar_kemandulan_1765163203.json,success,"search_returned:30, details_returned:0"

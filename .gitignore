@@ -69,10 +69,10 @@ cache/
 
 training/docker-compose.yml
 
-training/data/
-training/data/metadata/
-training/data/raw/
-training/data/chunks/
-training/data/processed/
+/training/data/
+/training/data/metadata/
+/training/data/raw/
+/training/data/chunks/
+/training/data/processed/
 
 backend/api/migrations/

@@ -26,12 +26,11 @@ load_dotenv(BASE / '.env')
 CONTACT_EMAIL = os.getenv("CONTACT_EMAIL")
 
 # Constants
-MAX_DOWNLOAD_BYTES = 200 * 1024 * 1024  # 200MB
+MAX_DOWNLOAD_BYTES = 200 * 1024 * 1024  
 PDF_CONTENT_TYPES = ("application/pdf", "application/x-pdf")
 DEFAULT_HEADERS = {
     "User-Agent": f"healthify-loader/1.0 (mailto:{CONTACT_EMAIL})"
 }
-
 
 def create_requests_session(total_retries=3, backoff_factor=0.5, 
                            status_forcelist=(429, 500, 502, 504)):
@@ -48,7 +47,6 @@ def create_requests_session(total_retries=3, backoff_factor=0.5,
     session.mount("https://", adapter)
     return session
 
-
 def create_safe_filename(text: str, fallback: str = 'doc', max_length: int = 200) -> str:
     """Konversi text menjadi nama file yang aman dengan menghilangkan karakter tidak valid."""
     if not text:
@@ -57,7 +55,6 @@ def create_safe_filename(text: str, fallback: str = 'doc', max_length: int = 200
     # Replace invalid characters with underscore
     safe_name = re.sub(r'[^\w\-_\. ]', '_', str(text))
     return safe_name[:max_length]
-
 
 def is_likely_pdf_content(headers: dict, url: str) -> bool:
     """Cek apakah response kemungkinan berisi PDF berdasarkan headers dan URL."""
@@ -73,7 +70,6 @@ def is_likely_pdf_content(headers: dict, url: str) -> bool:
         
     return False
 
-
 def download_pdf_from_url(url: str, dest_path: Path, timeout: int = 30, 
                          session=None, headers: dict = None, 
                          max_bytes: int = MAX_DOWNLOAD_BYTES) -> Path:
@@ -87,7 +83,6 @@ def download_pdf_from_url(url: str, dest_path: Path, timeout: int = 30,
                     headers=headers, allow_redirects=True) as response:
         response.raise_for_status()
 
-        # Warn if content might not be PDF
         if not is_likely_pdf_content(response.headers, url):
             print(f"Warning: content-type for {url} is {response.headers.get('Content-Type')}. "
                   f"Continuing download (may not be a PDF).")
@@ -103,7 +98,6 @@ def download_pdf_from_url(url: str, dest_path: Path, timeout: int = 30,
                     f.write(chunk)
     
     return dest_path
-
 
 def extract_text_from_pdf_file(pdf_path: Path) -> dict:
     """Ekstrak teks dari semua halaman PDF dan return sebagai structured data."""
@@ -125,7 +119,6 @@ def extract_text_from_pdf_file(pdf_path: Path) -> dict:
         }
     finally:
         doc.close()
-
 
 def process_single_document(item: dict, timeout: int = 30, session=None) -> dict:
     """Proses satu dokumen: download PDF, ekstrak teks, dan simpan hasil."""
@@ -175,7 +168,6 @@ def process_single_document(item: dict, timeout: int = 30, session=None) -> dict
         except Exception as cleanup_error:
             print(f"Failed to delete temp file {temp_pdf}: {cleanup_error}")
 
-
 def process_api_result(api_items: list, dry_run: bool = False, timeout: int = 30) -> list:
     """Proses daftar dokumen dari API results dan return list file paths yang berhasil."""
     if dry_run:
@@ -201,7 +193,6 @@ def process_api_result(api_items: list, dry_run: bool = False, timeout: int = 30
             print(f"Failed to process {url}: {e}")
 
     return results
-
 
 def main():
     """Entry point untuk command line interface."""
@@ -233,7 +224,6 @@ def main():
     
     if not args.dry_run:
         print(f"Selesai. {len(results)} dokumen berhasil diproses.")
-
 
 if __name__ == "__main__":
     main()

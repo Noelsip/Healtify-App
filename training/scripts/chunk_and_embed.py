@@ -60,19 +60,19 @@ def get_text_for_chunking(doc: Dict[str, Any]) -> str:
     """Ekstrak dan gabungkan teks dari berbagai field dokumen untuk chunking."""
     parts = []
 
-    # Tambahkan judul jika ada
+    # Menambahkan judul
     if doc.get("title"):
         parts.append(doc.get("title"))
 
-    # Tambahkan abstrak jika ada
+    # Menambahkan abstrak 
     if doc.get("abstract"):
         parts.append(doc.get("abstract"))
 
-    # Tambahkan field teks panjang jika ada
+    # Menambahkan field teks panjang
     if doc.get("text"):
         parts.append(doc.get("text"))
 
-    # Fallback: gabungkan semua nilai string dari dokumen
+    # Fallback: Menggabungkan semua nilai string dari dokumen
     if not parts:
         for v in doc.values():
             if isinstance(v, str) and len(v) > 10:
@@ -126,6 +126,7 @@ def _embed_with_sentence_transformers(texts: List[str]) -> List[List[float]]:
     except ImportError:
         print("[ERROR] sentence-transformers not installed!")
         print("[INFO] Returning zero vectors as last resort")
+        
         # Return zero vectors (768 dimensions to match Gemini)
         return [[0.0] * 768 for _ in texts]
     except Exception as e:
@@ -257,7 +258,6 @@ def process_and_embed_all(
             file_path, embed_fn, words_per_chunk, 
             overlap_words, save_jsonl, batch_size
         )
-
 
 def _process_single_document(
     file_path: Path,

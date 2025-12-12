@@ -1,8 +1,3 @@
-"""
-Quick script to check database embedding dimensions.
-Run this to understand what dimensions your database has.
-"""
-
 import os
 from pathlib import Path
 from dotenv import load_dotenv
@@ -42,7 +37,7 @@ try:
     results = cur.fetchall()
     
     if not results:
-        print("\n❌ No embeddings found in database!")
+        print("\nNo embeddings found in database!")
     else:
         print("\nEmbedding Dimensions in Database:")
         print("-" * 60)
@@ -88,19 +83,19 @@ try:
     print("=" * 60)
     
     if not results:
-        print("\n✅ No embeddings yet - you can use any embedding model")
-        print("   Recommended: Add GEMINI_API_KEY for best results")
+        print("\nNo embeddings yet - you can use any embedding model")
+        print("Recommended: Add GEMINI_API_KEY for best results")
     elif len(results) == 1:
         dims = results[0][0]
         if dims == 768:
-            print(f"\n✅ Database has {dims}-dim vectors (Gemini gemini-embedding-001)")
+            print(f"\nDatabase has {dims}-dim vectors (Gemini gemini-embedding-001)")
             print("   → Add GEMINI_API_KEY to .env")
             print("   → OR use sentence-transformers: all-mpnet-base-v2 (768-dim)")
         elif dims == 384:
-            print(f"\n✅ Database has {dims}-dim vectors (sentence-transformers)")
+            print(f"\nDatabase has {dims}-dim vectors (sentence-transformers)")
             print("   → Use model: all-MiniLM-L6-v2 (384-dim)")
         elif dims == 3072:
-            print(f"\n⚠️  Database has {dims}-dim vectors (Unusual!)")
+            print(f"\nDatabase has {dims}-dim vectors (Unusual!)")
             print("   This might be from:")
             print("   - Gemini 2.0 batch embeddings")
             print("   - Multiple embeddings concatenated")
@@ -109,9 +104,9 @@ try:
             print("   → Add GEMINI_API_KEY with same model used for initial embedding")
             print("   → OR truncate table and re-embed with standard 768-dim model")
         else:
-            print(f"\n⚠️  Database has {dims}-dim vectors (Custom)")
-            print(f"   → You need a model that outputs {dims} dimensions")
-            print("   → OR re-embed database with standard model")
+            print(f"\nDatabase has {dims}-dim vectors (Custom)")
+            print(f"You need a model that outputs {dims} dimensions")
+            print("OR re-embed database with standard model")
     
     cur.close()
     conn.close()
@@ -119,7 +114,7 @@ try:
     print("\n" + "=" * 60)
     
 except Exception as e:
-    print(f"❌ Error: {e}")
+    print(f"Error: {e}")
     print("\nMake sure:")
     print("  1. Database is running")
     print("  2. .env has correct DB credentials")

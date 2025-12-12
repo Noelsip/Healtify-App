@@ -20,7 +20,6 @@ ERROR_LOG_PATH = META_DIR / "loader_errors.csv"
 SUCCESS_LOG_PATH = META_DIR / "loader_success.csv"
 CLEANED_ITEMS_PATH = META_DIR / "api_items_cleaned.json"
 
-
 def log_error(url: str, reason: str):
     """Simpan log error ke CSV file untuk tracking."""
     header = ["timestamp", "url", "reason"]
@@ -32,7 +31,6 @@ def log_error(url: str, reason: str):
             writer.writerow(header)
         writer.writerow([datetime.now().isoformat(), url, reason])
 
-
 def log_success(url: str, file_path: str):
     """Simpan log success ke CSV file untuk tracking."""
     header = ["timestamp", "url", "file_path"]
@@ -43,7 +41,6 @@ def log_success(url: str, file_path: str):
         if is_new_file:
             writer.writerow(header)
         writer.writerow([datetime.now().isoformat(), url, file_path])
-
 
 def is_private_ip_address(url: str) -> bool:
     """Cek apakah URL mengarah ke IP address privat untuk keamanan."""
@@ -57,7 +54,6 @@ def is_private_ip_address(url: str) -> bool:
         return ip.startswith(private_ranges)
     except Exception:
         return False
-
 
 def extract_pdf_urls_from_crossref(crossref_data: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Extract PDF URLs dan metadata dari data CrossRef."""
@@ -104,7 +100,6 @@ def extract_pdf_urls_from_crossref(crossref_data: Dict[str, Any]) -> List[Dict[s
             })
     
     return results
-
 
 def extract_pdf_urls_from_semantic_scholar(scholar_data: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Extract PDF URLs dan metadata dari data Semantic Scholar."""
@@ -163,7 +158,6 @@ def extract_pdf_urls_from_semantic_scholar(scholar_data: Dict[str, Any]) -> List
     
     return results
 
-
 def extract_pdf_urls_from_sciencedirect(scidir_data: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Extract PDF URLs dan metadata dari data ScienceDirect."""
     results = []
@@ -195,7 +189,7 @@ def extract_pdf_urls_from_sciencedirect(scidir_data: Dict[str, Any]) -> List[Dic
                         pdf_url = href
                         break
         
-        # Fallback: construct PDF URL from DOI if available
+        # construct PDF URL from DOI if available
         if not pdf_url and doi:
             # Note: This may not always work without authentication
             pdf_url = f"https://www.sciencedirect.com/science/article/pii/{pii}/pdf" if pii else None
@@ -217,7 +211,6 @@ def extract_pdf_urls_from_sciencedirect(scidir_data: Dict[str, Any]) -> List[Dic
             })
     
     return results
-
 
 def extract_pdf_urls_from_google_books(books_data: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Extract PDF URLs dan metadata dari data Google Books."""
@@ -272,7 +265,6 @@ def extract_pdf_urls_from_google_books(books_data: Dict[str, Any]) -> List[Dict[
     
     return results
 
-
 def extract_pdf_urls_from_openlibrary(openlibrary_data: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Extract PDF URLs dan metadata dari data Open Library."""
     results = []
@@ -317,7 +309,6 @@ def extract_pdf_urls_from_openlibrary(openlibrary_data: Dict[str, Any]) -> List[
             })
     
     return results
-
 
 def build_api_items_from_raw_files() -> List[Dict[str, Any]]:
     """Build daftar API items dari semua file raw yang tersedia."""
@@ -365,7 +356,6 @@ def build_api_items_from_raw_files() -> List[Dict[str, Any]]:
     
     return api_items
 
-
 def deduplicate_api_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Remove duplicate items berdasarkan PDF URL."""
     seen_urls: Set[str] = set()
@@ -380,7 +370,6 @@ def deduplicate_api_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         unique_items.append(item)
     
     return unique_items
-
 
 def get_previously_failed_urls() -> Set[str]:
     """Get set of URLs yang pernah gagal dari error log sebelumnya."""
@@ -399,7 +388,6 @@ def get_previously_failed_urls() -> Set[str]:
             print(f"Warning: Could not read error log: {e}")
     
     return failed_urls
-
 
 def clean_and_filter_items(api_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Filter dan bersihkan API items dari URL tidak valid atau berbahaya."""
@@ -426,7 +414,6 @@ def clean_and_filter_items(api_items: List[Dict[str, Any]]) -> List[Dict[str, An
     
     return cleaned_items
 
-
 def process_documents_safely(api_items: List[Dict[str, Any]]) -> List[str]:
     """Process documents satu per satu dengan error handling yang aman."""
     saved_files = []
@@ -445,12 +432,10 @@ def process_documents_safely(api_items: List[Dict[str, Any]]) -> List[str]:
     
     return saved_files
 
-
 def save_cleaned_items(api_items: List[Dict[str, Any]]):
     """Simpan daftar API items yang sudah dibersihkan ke file JSON."""
     with open(CLEANED_ITEMS_PATH, "w", encoding="utf-8") as f:
         json.dump(api_items, f, ensure_ascii=False, indent=2)
-
 
 def main(dry_run: bool = False):
     """Main pipeline untuk prepare dan run loader dengan error handling yang baik."""
@@ -474,7 +459,7 @@ def main(dry_run: bool = False):
         return api_items
 
     if not api_items:
-        print("❌ No valid URLs to process.")
+        print("No valid URLs to process.")
         return []
 
     print("\n[3/4] Running loader for download + text extraction ...")
@@ -484,7 +469,7 @@ def main(dry_run: bool = False):
     save_cleaned_items(api_items)
     print(f"Valid URL list saved to {CLEANED_ITEMS_PATH}")
 
-    print(f"\n✅ Pipeline completed without fatal errors.")
+    print(f"\nPipeline completed without fatal errors.")
     print(f"Extracted results: data/raw_pdf/")
     print(f"Logs: {ERROR_LOG_PATH} and {SUCCESS_LOG_PATH}")
 

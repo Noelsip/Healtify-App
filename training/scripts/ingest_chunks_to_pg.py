@@ -74,7 +74,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
 def connect_db():
     """Buat koneksi ke database PostgreSQL dengan pgvector support."""
     connection = psycopg2.connect(
@@ -86,7 +85,6 @@ def connect_db():
     )
     register_vector(connection)
     return connection
-
 
 def ensure_table(connection, vector_dim: int):
     """Buat tabel embeddings jika belum ada."""
@@ -107,7 +105,6 @@ def ensure_table(connection, vector_dim: int):
         """)
         connection.commit()
 
-
 def iter_jsonl_records(file_path: Path) -> Iterable[dict]:
     """Generator untuk membaca file JSONL baris per baris."""
     with file_path.open("r", encoding="utf-8") as fh:
@@ -121,7 +118,6 @@ def iter_jsonl_records(file_path: Path) -> Iterable[dict]:
             except json.JSONDecodeError as e:
                 logger.warning(f"Failed to decode JSON at {file_path.name}:{line_num}: {e}")
 
-
 def detect_vector_dimension(files: Iterable[Path]) -> Optional[int]:
     """Deteksi dimensi vektor dari embedding pertama yang valid."""
     for file_path in files:
@@ -130,7 +126,6 @@ def detect_vector_dimension(files: Iterable[Path]) -> Optional[int]:
             if embedding and isinstance(embedding, list):
                 return len(embedding)
     return None
-
 
 def prepare_record_tuple(record: dict) -> Tuple:
     """Konversi record menjadi tuple untuk database insert."""
@@ -148,7 +143,6 @@ def prepare_record_tuple(record: dict) -> Tuple:
         embedding_str,
     )
 
-
 def _convert_embedding_to_string(embedding) -> Optional[str]:
     """Konversi embedding menjadi string format PostgreSQL vector."""
     if embedding is None:
@@ -163,7 +157,6 @@ def _convert_embedding_to_string(embedding) -> Optional[str]:
     except Exception as e:
         logger.warning("Gagal konversi embedding ke float list: %s", e)
         return None
-
 
 def validate_record(record: dict, expected_vector_dim: int, file_name: str) -> bool:
     """Validasi record sebelum insert ke database."""
@@ -186,7 +179,6 @@ def validate_record(record: dict, expected_vector_dim: int, file_name: str) -> b
     
     return True
 
-
 def insert_batch_to_db(cursor, batch_data: list) -> int:
     """Insert batch data ke database."""
     if not batch_data:
@@ -197,7 +189,6 @@ def insert_batch_to_db(cursor, batch_data: list) -> int:
     
     execute_values(cursor, sql, batch_data, template=template, page_size=100)
     return len(batch_data)
-
 
 def process_file(file_path: Path, cursor, vector_dim: int) -> int:
     """Proses satu file JSONL dan insert ke database."""
@@ -226,7 +217,6 @@ def process_file(file_path: Path, cursor, vector_dim: int) -> int:
         logger.info(f"Inserted final batch of {inserted_count} records from {file_path.name}")
     
     return total_inserted
-
 
 def ingest(force_all: bool = False):
     """Fungsi utama untuk ingest chunks ke PostgreSQL database.
@@ -286,7 +276,6 @@ def ingest(force_all: bool = False):
     logger.info(f"Proses selesai. Total records inserted: {total_inserted}")
     return total_inserted
 
-
 def _determine_vector_dimension(files: list) -> int:
     """Tentukan dimensi vektor dari environment variable atau deteksi otomatis."""
     vector_dim = VECTOR_DIM
@@ -304,7 +293,6 @@ def _determine_vector_dimension(files: list) -> int:
         logger.info(f"Menggunakan dimensi vektor dari env: {vector_dim}")
     
     return vector_dim
-
 
 if __name__ == "__main__":
     ingest()

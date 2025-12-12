@@ -96,11 +96,7 @@ def _save_failed_response(source: str, identifier: str, status_code, text_previe
         # best-effort, do not break pipeline
         pass
 
-
-# -------------------
 # Translation utils
-# -------------------
-
 def get_gemini_client():
     """Lazy load Gemini client untuk translation."""
     global _gemini_client
@@ -117,7 +113,6 @@ def get_gemini_client():
 
 def detect_language(text: str) -> str:
     """Deteksi bahasa dari teks (simple heuristic)."""
-    # Simple heuristic: cek jumlah kata Indonesia vs English
     indonesian_words = ["dan", "yang", "dengan", "untuk", "atau", "dari", "pada", "di", "ke", "ini", "itu"]
     english_words = ["and", "the", "with", "for", "or", "from", "on", "in", "to", "this", "that"]
     
@@ -138,7 +133,6 @@ def translate_query(query: str, target_lang: str = "English") -> Optional[str]:
     # Deteksi bahasa source
     source_lang = detect_language(query)
     
-    # Skip jika sudah dalam bahasa target
     if source_lang == target_lang:
         return None
     
@@ -199,11 +193,7 @@ def generate_bilingual_queries(query: str) -> List[str]:
     
     return queries
 
-
-# -------------------
 # PubMed (NCBI) utils
-# -------------------
-
 def fetch_pubmed(query: str, maximum_results: int = 5) -> Optional[str]:
     """Ambil artikel dari PubMed menggunakan eUtils API."""
     try:
@@ -269,11 +259,7 @@ def _fetch_pubmed_articles(article_ids: list) -> str:
     
     return response.text
 
-
-# -------------------
 # CrossRef
-# -------------------
-
 def fetch_crossref(query: str, rows: int = 10) -> Optional[str]:
     """Ambil artikel dari CrossRef API."""
     try:
@@ -305,11 +291,7 @@ def fetch_crossref(query: str, rows: int = 10) -> Optional[str]:
         print(f"[crossref] Error fetching from CrossRef: {e}")
         return None
 
-
-# -------------------
 # Semantic Scholar
-# -------------------
-
 def fetch_semantic_scholar(query: str, limit: int = 5) -> Optional[str]:
     """Ambil artikel dari Semantic Scholar API."""
     try:
@@ -467,11 +449,7 @@ def _save_semantic_scholar_results(query: str, paper_ids: list, detailed_results
     
     return file_path
 
-
-# -------------------
 # Elsevier / ScienceDirect
-# -------------------
-
 def fetch_sciencedirect(query: str, limit: int = 5) -> Optional[str]:
     """Ambil hasil pencarian dari ScienceDirect (Elsevier) API.
     Requires ELSEVIER_API_KEY in env.
@@ -515,11 +493,7 @@ def fetch_elsevier_books(query: str, limit: int = 5) -> Optional[str]:
         print(f"[elsevier_books] Error fetching Elsevier books: {e}")
         return None
 
-
-# -------------------
 # Google Books
-# -------------------
-
 def fetch_google_books(query: str, limit: int = 5) -> Optional[str]:
     """Ambil buku (metadata) dari Google Books API.
     GOOGLE_BOOKS_API_KEY optional — but recommended for higher quota."""
@@ -550,11 +524,7 @@ def fetch_google_books(query: str, limit: int = 5) -> Optional[str]:
         print(f"[google_books] Error fetching from Google Books: {e}")
         return None
 
-
-# -------------------
 # Open Library
-# -------------------
-
 def fetch_openlibrary(query: str, limit: int = 5) -> Optional[str]:
     """Ambil buku dari Open Library (no API key required)."""
     try:
@@ -580,11 +550,7 @@ def fetch_openlibrary(query: str, limit: int = 5) -> Optional[str]:
         print(f"[openlibrary] Error fetching from Open Library: {e}")
         return None
 
-
-# ===========================
 # NEW SOURCES (No API Key Required)
-# ===========================
-
 def fetch_europe_pmc(query: str, limit: int = 10) -> Optional[str]:
     """Fetch dari Europe PMC (PubMed + PMC + Preprints) - GRATIS."""
     try:
@@ -771,11 +737,7 @@ def resolve_unpaywall(doi: str) -> Optional[Dict[str, Any]]:
         print(f"[unpaywall] Error resolving DOI {doi}: {e}")
         return None
 
-
-# ===========================
 # FAST PARALLEL FETCH
-# ===========================
-
 def fetch_sources_parallel(query: str, sources: List[str] = None, limit: int = 5, timeout: int = 20) -> Dict[str, Any]:
     """
     Fetch dari multiple sources secara PARALLEL untuk kecepatan maksimal.
@@ -792,13 +754,13 @@ def fetch_sources_parallel(query: str, sources: List[str] = None, limit: int = 5
     # Default: ALL 7 sources for maximum coverage
     if sources is None:
         sources = [
-            "pubmed",           # Primary medical source
-            "europepmc",        # PubMed + PMC + Preprints
-            "openalex",         # Microsoft Academic replacement
-            "crossref",         # DOI metadata
-            "semantic_scholar", # AI-powered search
-            "doaj",             # Open Access Journals
-            "arxiv",            # Preprints
+            "pubmed",           
+            "europepmc",        
+            "openalex",         
+            "crossref",         
+            "semantic_scholar", 
+            "doaj",             
+            "arxiv",            
         ]
     
     fetch_funcs = {
@@ -850,10 +812,8 @@ def fetch_sources_parallel(query: str, sources: List[str] = None, limit: int = 5
     return results
 
 
-# -------------------
-# Orchestration
-# -------------------
 
+# Orchestration
 def fetch_all_sources(query: str, pubmed_max: int = 5, crossref_rows: int = 5, 
                      semantic_limit: int = 5, scidir_limit: int = 5, 
                      google_limit: int = 5, openlib_limit: int = 5,
@@ -908,7 +868,7 @@ def fetch_all_sources(query: str, pubmed_max: int = 5, crossref_rows: int = 5,
                 results[f'semantic_scholar_{idx}'] = scholar_result
             
         else:
-            # ===== SEQUENTIAL MODE =====
+            # SEQUENTIAL MODE 
             print(f"Fetching from PubMed: {q}")
             pubmed_result = fetch_pubmed(q, maximum_results=pubmed_max)
             if pubmed_result:
@@ -985,4 +945,4 @@ if __name__ == "__main__":
     # Fetch semua queries dengan progress bar
     for query in tqdm(sample_queries, desc="Fetching queries"):
         fetch_all_sources(query)
-        time.sleep(1)  # Delay antar query
+        time.sleep(1)  

@@ -15,7 +15,6 @@ PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 METADATA_CSV_PATH = BASE_DIR / "data" / "metadata" / "processed_metadata.csv"
 METADATA_CSV_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-
 def parse_crossref_file(file_path: pathlib.Path) -> List[Dict[str, Any]]:
     """Parse file JSON CrossRef dan extract informasi dokumen yang relevan."""
     file_content = file_path.read_text(encoding="utf-8")
@@ -74,7 +73,6 @@ def parse_crossref_file(file_path: pathlib.Path) -> List[Dict[str, Any]]:
     
     return parsed_documents
 
-
 def parse_semantic_scholar_file(file_path: pathlib.Path) -> List[Dict[str, Any]]:
     """Parse file JSON Semantic Scholar dan extract informasi paper yang relevan."""
     file_content = file_path.read_text(encoding="utf-8")
@@ -124,7 +122,6 @@ def parse_semantic_scholar_file(file_path: pathlib.Path) -> List[Dict[str, Any]]
         parsed_documents.append(parsed_document)
     
     return parsed_documents
-
 
 def parse_pubmed_xml_file(file_path: pathlib.Path) -> List[Dict[str, Any]]:
     """Parse file XML PubMed dan extract informasi artikel yang relevan."""
@@ -199,7 +196,6 @@ def parse_pubmed_xml_file(file_path: pathlib.Path) -> List[Dict[str, Any]]:
 
     return parsed_documents
 
-
 def parse_google_books_file(file_path: pathlib.Path) -> List[Dict[str, Any]]:
     """Parse file JSON Google Books dan extract informasi buku yang relevan."""
     file_content = file_path.read_text(encoding="utf-8")
@@ -257,7 +253,6 @@ def parse_google_books_file(file_path: pathlib.Path) -> List[Dict[str, Any]]:
     
     return parsed_documents
 
-
 def parse_sciencedirect_file(file_path: pathlib.Path) -> List[Dict[str, Any]]:
     """Parse file JSON ScienceDirect dan extract informasi artikel yang relevan."""
     file_content = file_path.read_text(encoding="utf-8")
@@ -314,7 +309,6 @@ def parse_sciencedirect_file(file_path: pathlib.Path) -> List[Dict[str, Any]]:
     
     return parsed_documents
 
-
 def parse_openlibrary_file(file_path: pathlib.Path) -> List[Dict[str, Any]]:
     """Parse file JSON Open Library dan extract informasi buku yang relevan."""
     file_content = file_path.read_text(encoding="utf-8")
@@ -361,7 +355,7 @@ def parse_openlibrary_file(file_path: pathlib.Path) -> List[Dict[str, Any]]:
             "abstract": abstract_value,
             "authors": authors_list,
             "year": year_value,
-            "doi": None,  # Books typically don't have DOIs
+            "doi": None,
             "isbn": isbn_value,
             "source": "openlibrary",
             "raw_file": file_path.name
@@ -370,11 +364,7 @@ def parse_openlibrary_file(file_path: pathlib.Path) -> List[Dict[str, Any]]:
     
     return parsed_documents
 
-
-# ===========================
 # NEW SOURCE PARSERS
-# ===========================
-
 def parse_europepmc_file(file_path: pathlib.Path) -> List[Dict[str, Any]]:
     """Parse file JSON Europe PMC."""
     file_content = file_path.read_text(encoding="utf-8")
@@ -408,7 +398,6 @@ def parse_europepmc_file(file_path: pathlib.Path) -> List[Dict[str, Any]]:
         parsed_documents.append(parsed_document)
     
     return parsed_documents
-
 
 def parse_openalex_file(file_path: pathlib.Path) -> List[Dict[str, Any]]:
     """Parse file JSON OpenAlex."""
@@ -448,7 +437,6 @@ def parse_openalex_file(file_path: pathlib.Path) -> List[Dict[str, Any]]:
         parsed_documents.append(parsed_document)
     
     return parsed_documents
-
 
 def parse_doaj_file(file_path: pathlib.Path) -> List[Dict[str, Any]]:
     """Parse file JSON DOAJ."""
@@ -495,7 +483,6 @@ def parse_doaj_file(file_path: pathlib.Path) -> List[Dict[str, Any]]:
     
     return parsed_documents
 
-
 def parse_arxiv_file(file_path: pathlib.Path) -> List[Dict[str, Any]]:
     """Parse file JSON arXiv."""
     file_content = file_path.read_text(encoding="utf-8")
@@ -525,7 +512,6 @@ def parse_arxiv_file(file_path: pathlib.Path) -> List[Dict[str, Any]]:
     
     return parsed_documents
 
-
 def save_document_as_json(document: Dict[str, Any], output_folder: pathlib.Path) -> pathlib.Path:
     """Simpan dokumen sebagai file JSON dengan nama file yang aman."""
     # Create safe filename from document ID
@@ -542,7 +528,6 @@ def save_document_as_json(document: Dict[str, Any], output_folder: pathlib.Path)
     )
     
     return output_file_path
-
 
 def determine_parser_for_file(file_path: pathlib.Path):
     """Tentukan parser yang tepat berdasarkan nama file dan ekstensi."""
@@ -571,7 +556,6 @@ def determine_parser_for_file(file_path: pathlib.Path):
         return parse_arxiv_file
     else:
         return None
-
 
 def process_all_raw_files() -> List[Dict[str, Any]]:
     """Proses semua file raw dan return list semua dokumen yang telah diparse."""
@@ -615,7 +599,6 @@ def process_all_raw_files() -> List[Dict[str, Any]]:
     
     return all_documents
 
-
 def _save_metadata_to_csv(metadata_rows: List[Dict[str, Any]]):
     """Simpan metadata processing ke CSV file."""
     csv_header = ["id", "title", "source", "raw_file", "processed_file"]
@@ -634,7 +617,6 @@ def main():
     documents = process_all_raw_files()
     print(f"Processing completed. {len(documents)} documents processed.")
     print("Check folders 'data/processed' dan 'data/metadata' for results.")
-
 
 if __name__ == "__main__":
     main()

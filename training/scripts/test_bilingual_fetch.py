@@ -1,11 +1,3 @@
-#!/usr/bin/env python3
-"""
-Test script untuk verifikasi bilingual fetching dan parsers baru.
-
-Usage:
-    python test_bilingual_fetch.py
-"""
-
 import sys
 from pathlib import Path
 
@@ -43,7 +35,7 @@ def test_language_detection():
     passed = 0
     for query, expected_lang in test_cases:
         detected = detect_language(query)
-        status = "✅ PASS" if detected == expected_lang else "❌ FAIL"
+        status = "PASS" if detected == expected_lang else "FAIL"
         print(f"{status} | '{query}' -> {detected} (expected: {expected_lang})")
         if detected == expected_lang:
             passed += 1
@@ -66,9 +58,9 @@ def test_translation():
     for query, target_lang in test_cases:
         translated = translate_query(query, target_lang=target_lang)
         if translated:
-            print(f"✅ '{query}' -> '{translated}' ({target_lang})")
+            print(f"'{query}' -> '{translated}' ({target_lang})")
         else:
-            print(f"⚠️  '{query}' -> No translation needed or API unavailable")
+            print(f"'{query}' -> No translation needed or API unavailable")
     
     print("\nNote: Translation requires GEMINI_API_KEY to be set")
     return True
@@ -94,7 +86,6 @@ def test_bilingual_query_generation():
     
     return True
 
-
 def test_parser_detection():
     """Test parser detection for all file types."""
     print("\n" + "="*60)
@@ -118,17 +109,17 @@ def test_parser_detection():
         
         if expected_source is None:
             if parser is None:
-                print(f"✅ PASS | {filename} -> No parser (expected)")
+                print(f"PASS | {filename} -> No parser (expected)")
                 passed += 1
             else:
-                print(f"❌ FAIL | {filename} -> Found parser (unexpected)")
+                print(f"FAIL | {filename} -> Found parser (unexpected)")
         else:
             if parser is not None:
                 parser_name = parser.__name__
-                print(f"✅ PASS | {filename} -> {parser_name}")
+                print(f"PASS | {filename} -> {parser_name}")
                 passed += 1
             else:
-                print(f"❌ FAIL | {filename} -> No parser (expected {expected_source})")
+                print(f"FAIL | {filename} -> No parser (expected {expected_source})")
     
     print(f"\nResult: {passed}/{len(test_files)} tests passed")
     return passed == len(test_files)
@@ -142,7 +133,7 @@ def test_small_fetch():
     
     response = input("Run small API fetch test? (requires API keys, costs quota) [y/N]: ")
     if response.lower() != 'y':
-        print("⏭️  Skipped")
+        print("Skipped")
         return True
     
     try:
@@ -161,7 +152,7 @@ def test_small_fetch():
             use_bilingual=True
         )
         
-        print(f"\n✅ Fetch completed!")
+        print(f"\n Fetch completed!")
         print(f"Files saved: {len(results)}")
         for key, filepath in results.items():
             if filepath:
@@ -170,7 +161,7 @@ def test_small_fetch():
         return True
         
     except Exception as e:
-        print(f"❌ Fetch failed: {e}")
+        print(f"Fetch failed: {e}")
         print("This may be due to missing API keys or network issues")
         return False
 
@@ -199,15 +190,15 @@ def main():
     total = len(results)
     
     for test_name, result in results:
-        status = "✅ PASS" if result else "❌ FAIL"
+        status = " PASS" if result else "FAIL"
         print(f"{status} | {test_name}")
     
     print(f"\n{passed}/{total} test suites passed")
     
     if passed == total:
-        print("\n🎉 All tests passed! The fixes are working correctly.")
+        print("\nAll tests passed! The fixes are working correctly.")
     else:
-        print("\n⚠️  Some tests failed. Check the output above for details.")
+        print("\nSome tests failed. Check the output above for details.")
     
     print("="*80 + "\n")
 

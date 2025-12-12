@@ -272,7 +272,7 @@ def get_cached_verification(claim: str) -> Optional[Dict[str, Any]]:
     key = _generate_key("v", claim.lower().strip())
     result = get_cache("verification", key)
     if result:
-        print(f"[CACHE] ✅ HIT: Verification cache for claim")
+        print(f"[CACHE]HIT: Verification cache for claim")
     return result
 
 
@@ -287,7 +287,7 @@ def get_cached_fetch(query: str, source: str) -> Optional[Any]:
     key = _generate_key("f", f"{source}:{query.lower().strip()}")
     result = get_cache("fetch", key)
     if result:
-        print(f"[CACHE] ✅ HIT: Fetch cache for {source}")
+        print(f"[CACHE]HIT: Fetch cache for {source}")
     return result
 
 

@@ -99,13 +99,13 @@ const resources = {
           }
         }
       },
-      // 🆕 REPORT PAGE TRANSLATIONS
+      // REPORT PAGE TRANSLATIONS
       report: {
         title: "Report Verification Error",
         claimLabel: "Reported Claim",
         claimPlaceholder: "Copy and paste the claim you want to report here...",
-        reasonLabel: "Explain why you think the verification result is incorrect",
-        reasonPlaceholder: "Detailed explanation of discrepancy...",
+        reasonLabel: "Explain why you think the verification result is incorrect (ideally based on the journal abstract if you provide a DOI)",
+        reasonPlaceholder: "Explain in detail which part of the result is not consistent with the journal abstract or other evidence you have...",
         reporterInfo: "Reporter Information (Optional)",
         name: "Name",
         namePlaceholder: "Your Name",
@@ -118,7 +118,7 @@ const resources = {
         },
         doiLabel: "DOI Link",
         doiPlaceholder: "https://doi.org/10.xxxx/xxxxx",
-        doiHelper: "Enter DOI link from scientific journal supporting your claim",
+        doiHelper: "Enter a DOI link from a scientific journal and, if possible, base your explanation on its abstract",
         pdfLabel: "Upload PDF File",
         pdfHelper: "Maximum file size: 20MB",
         urlLabel: "Source Link (Optional)",
@@ -369,8 +369,8 @@ const resources = {
         title: "Laporkan Kesalahan Klaim",
         claimLabel: "Klaim yang Dilaporkan",
         claimPlaceholder: "Salin dan tempel klaim yang ingin Anda laporkan disini...",
-        reasonLabel: "Jelaskan mengapa hasil verifikasi menurut Anda salah",
-        reasonPlaceholder: "Detail alasan ketidaksesuaian...",
+        reasonLabel: "Jelaskan mengapa hasil verifikasi menurut Anda salah (sebaiknya berdasarkan abstrak jurnal jika Anda mengisi DOI)",
+        reasonPlaceholder: "Jelaskan secara rinci bagian mana dari hasil verifikasi yang tidak sesuai dengan abstrak jurnal atau bukti lain yang Anda punya...",
         reporterInfo: "Informasi Pelapor (Opsional)",
         name: "Nama",
         namePlaceholder: "Nama Anda",
@@ -383,7 +383,7 @@ const resources = {
         },
         doiLabel: "Link DOI",
         doiPlaceholder: "https://doi.org/10.xxxx/xxxxx",
-        doiHelper: "Masukan Link DOI dari jurnal ilmiah yang mendukung klaim Anda",
+        doiHelper: "Masukan Link DOI dari jurnal ilmiah dan, jika bisa, dasarkan alasan Anda pada abstrak jurnal tersebut",
         pdfLabel: "Upload File PDF",
         pdfHelper: "Maksimal ukuran file: 20MB",
         urlLabel: "Link Sumber (Opsional)",

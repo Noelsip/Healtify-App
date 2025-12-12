@@ -21,9 +21,6 @@ const Hero = () => {
     const [loadingProgress, setLoadingProgress] = useState(0);
     const [elapsedTime, setElapsedTime] = useState(0);
 
-    /**
-     * FORCE REFRESH untuk bypass cache
-     */
     useEffect(() => {
         if (verificationResult && verificationResult.verification_result?.summary) {
             translateSummary();
@@ -141,13 +138,13 @@ const Hero = () => {
         }
         
         text += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-        text += `✅ ${t('hero.verifiedBy')}\n`;
-        text += `📅 ${new Date(verificationResult.created_at).toLocaleDateString(i18n.language === 'id' ? 'id-ID' : 'en-US', {
+        text += ` ${t('hero.verifiedBy')}\n`;
+        text += ` ${new Date(verificationResult.created_at).toLocaleDateString(i18n.language === 'id' ? 'id-ID' : 'en-US', {
             day: 'numeric',
             month: 'long',
             year: 'numeric'
         })}\n`;
-        text += `🌐 Visit: https://healthify.app\n`;
+        text += ` Visit: https://healthify.app\n`;
         text += `━━━━━━━━━━━━━━━━━━━━━━\n`;
         
         return text;

@@ -1,4 +1,4 @@
-import { AlertCircle, ArrowLeft, Filter as FilterIcon, LogOut, Scale, Search } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Bot, Calendar, CheckCircle2, Clock, FileText, Filter as FilterIcon, Info, Loader2, LogOut, Scale, Search, User, X, XCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -83,7 +83,6 @@ const AdminDisputes = () => {
         setActionLoading(true);
 
         try {
-            // ✅ MAPPING LABEL DARI FRONTEND KE BACKEND
             const labelMap = {
                 'auto': null,
                 'TRUE': 'valid',
@@ -95,7 +94,7 @@ const AdminDisputes = () => {
 
             const payload = {
                 action: action,
-                review_note: adminNotes  // ✅ UBAH: admin_notes → review_note
+                review_note: adminNotes
             };
             
             // Jika bukan auto, tambahkan manual update fields
@@ -104,7 +103,6 @@ const AdminDisputes = () => {
                 payload.re_verify = false;
                 payload.new_label = mappedLabel;
                 payload.new_confidence = newConfidence;
-                payload.new_summary = `Updated based on user dispute and admin review`;
             } else if (action === 'approve') {
                 // Jika auto, gunakan re-verify
                 payload.re_verify = true;
@@ -133,13 +131,13 @@ const AdminDisputes = () => {
             let message = data.message || `Dispute ${action}ed successfully`;
             
             if (data.verification_update) {
-                message += `\n\n✅ Verification Updated:\n` +
+                message += `\n\Verification Updated:\n` +
                     `Label: ${data.verification_update.label}\n` +
                     `Confidence: ${(data.verification_update.confidence * 100).toFixed(1)}%`;
             }
             
             if (data.updated_via) {
-                message += `\n\n📊 Updated Via: ${data.updated_via.replace(/_/g, ' ')}`;
+                message += `\n\nUpdated Via: ${data.updated_via.replace(/_/g, ' ')}`;
             }
             
             alert(message);

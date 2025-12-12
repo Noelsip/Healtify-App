@@ -12,24 +12,18 @@ from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
-# ===========================
-# Configuration
-# ===========================
-
 # Typo correction threshold
-TYPO_SIMILARITY_THRESHOLD = 0.85  # 85% similarity = likely typo
-MIN_WORD_LENGTH_FOR_TYPO_CHECK = 4  # Only check words with 4+ chars
+TYPO_SIMILARITY_THRESHOLD = 0.85  
+MIN_WORD_LENGTH_FOR_TYPO_CHECK = 4
 
 # Semantic similarity threshold
-SEMANTIC_SIMILARITY_THRESHOLD = 0.90  # 90% = same meaning
+SEMANTIC_SIMILARITY_THRESHOLD = 0.90
 
 # Cache settings
 MAX_CACHE_SIZE = 1000
 
-# ===========================
-# Core Normalization Functions
-# ===========================
 
+# Core Normalization Functions
 def normalize_claim_text(text: str, aggressive: bool = False) -> str:
     """
     Normalisasi text dengan intelligent processing.
@@ -44,14 +38,14 @@ def normalize_claim_text(text: str, aggressive: bool = False) -> str:
     if not text:
         return ""
     
-    # Step 1: Basic cleaning
+    # Basic cleaning
     normalized = _basic_cleaning(text)
     
-    # Step 2: Fix common typos (optional)
+    # Fix common typos (optional)
     if aggressive:
         normalized = _fix_typos(normalized)
     
-    # Step 3: Standardize spacing
+    # Standardize spacing
     normalized = _standardize_spacing(normalized)
     
     return normalized
@@ -116,11 +110,7 @@ def _check_typo(word: str) -> str:
     # In production, integrate with spell checker
     return word
 
-
-# ===========================
 # Semantic Similarity Functions
-# ===========================
-
 def calculate_text_similarity(text1: str, text2: str) -> float:
     """
     Calculate semantic similarity between two texts.
@@ -136,13 +126,13 @@ def calculate_text_similarity(text1: str, text2: str) -> float:
     norm1 = normalize_claim_text(text1, aggressive=False)
     norm2 = normalize_claim_text(text2, aggressive=False)
     
-    # Method 1: Character-level similarity (handles typos well)
+    # Character-level similarity
     char_similarity = SequenceMatcher(None, norm1, norm2).ratio()
     
-    # Method 2: Word-level similarity (handles reordering)
+    # Word-level similarity
     word_similarity = _calculate_word_similarity(norm1, norm2)
     
-    # Method 3: Token set similarity (order-independent)
+    # Token set similarity
     token_similarity = _calculate_token_set_similarity(norm1, norm2)
     
     # Weighted combination
@@ -153,7 +143,6 @@ def calculate_text_similarity(text1: str, text2: str) -> float:
     )
     
     return final_similarity
-
 
 def _calculate_word_similarity(text1: str, text2: str) -> float:
     """Calculate similarity based on word overlap."""
@@ -169,7 +158,6 @@ def _calculate_word_similarity(text1: str, text2: str) -> float:
     
     return intersection / union if union > 0 else 0.0
 
-
 def _calculate_token_set_similarity(text1: str, text2: str) -> float:
     """
     Calculate similarity ignoring word order completely.
@@ -181,11 +169,7 @@ def _calculate_token_set_similarity(text1: str, text2: str) -> float:
     # Compare sorted token lists
     return SequenceMatcher(None, ' '.join(tokens1), ' '.join(tokens2)).ratio()
 
-
-# ===========================
 # Advanced Similarity with Fuzzy Matching
-# ===========================
-
 def find_similar_texts(
     query_text: str,
     candidate_texts: List[Tuple[int, str]],
@@ -217,11 +201,7 @@ def find_similar_texts(
     
     return results[:top_k]
 
-
-# ===========================
 # Hash Generation (Semantic-aware)
-# ===========================
-
 def generate_semantic_hash(text: str, use_aggressive: bool = False) -> str:
     """
     Generate hash that's resistant to typos and variations.
@@ -256,11 +236,7 @@ def generate_fuzzy_hash(text: str) -> str:
     fuzzy_text = ' '.join(sorted_words)
     return hashlib.md5(fuzzy_text.encode('utf-8')).hexdigest()[:16]
 
-
-# ===========================
 # Intelligent Duplicate Detection
-# ===========================
-
 class ClaimSimilarityMatcher:
     """
     Intelligent matcher for finding duplicate/similar claims.
@@ -348,11 +324,7 @@ class ClaimSimilarityMatcher:
             'similarity': 0.0
         }
 
-
-# ===========================
 # Integration with Embedding Models (Optional)
-# ===========================
-
 def calculate_embedding_similarity(text1: str, text2: str) -> float:
     """
     Calculate similarity using embedding models (optional).
@@ -362,26 +334,13 @@ def calculate_embedding_similarity(text1: str, text2: str) -> float:
     Uncomment if you want to use semantic embeddings.
     """
     try:
-        # Uncomment if you have sentence-transformers installed:
-        # from sentence_transformers import SentenceTransformer
-        # model = SentenceTransformer('paraphrase-multilingual-mpnet-base-v2')
-        # 
-        # embeddings = model.encode([text1, text2])
-        # similarity = cosine_similarity([embeddings[0]], [embeddings[1]])[0][0]
-        # return float(similarity)
-        
-        # Fallback to basic similarity
         return calculate_text_similarity(text1, text2)
     
     except ImportError:
         logger.warning("sentence-transformers not available, using basic similarity")
         return calculate_text_similarity(text1, text2)
 
-
-# ===========================
 # Utility Functions
-# ===========================
-
 @lru_cache(maxsize=MAX_CACHE_SIZE)
 def preprocess_for_comparison(text: str) -> str:
     """
@@ -389,7 +348,6 @@ def preprocess_for_comparison(text: str) -> str:
     Cached for performance.
     """
     return normalize_claim_text(text, aggressive=False)
-
 
 def get_similarity_explanation(similarity: float) -> str:
     """Get human-readable explanation of similarity score."""
@@ -404,11 +362,7 @@ def get_similarity_explanation(similarity: float) -> str:
     else:
         return "Tidak mirip"
 
-
-# ===========================
 # Testing & Debugging
-# ===========================
-
 def test_normalization():
     """Test function untuk verify normalization works correctly."""
     test_cases = [
@@ -433,7 +387,6 @@ def test_normalization():
         print(f"Explanation: {get_similarity_explanation(similarity)}")
         print(f"Same hash: {generate_semantic_hash(text1) == generate_semantic_hash(text2)}")
         print("-" * 80)
-
 
 if __name__ == "__main__":
     test_normalization()

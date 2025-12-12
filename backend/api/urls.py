@@ -54,7 +54,7 @@ urlpatterns = [
     path('admin/me/', AdminMeView.as_view(), name='admin-me'),
     path('admin/create/', AdminCreateView.as_view(), name='admin-create'),
 
-    # Admin Dashboard & Operations (TANPA DUPLIKASI)
+    # Admin Dashboard & Operations 
     path('admin/dashboard/stats/', AdminDashboardStatsView.as_view(), name='admin-dashboard-stats'),
     path('admin/users/', AdminUserListView.as_view(), name='admin-user-list'),
     path('admin/users/<int:user_id>/', AdminUserDetailView.as_view(), name='admin-user-detail'),

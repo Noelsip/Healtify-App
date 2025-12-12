@@ -58,8 +58,8 @@ class VerificationResultSerializer(serializers.ModelSerializer):
             'label_display',
             'label_color',
             'summary', 
-            'confidence',  # Can be NULL
-            'confidence_percent',  # Can be NULL
+            'confidence',  
+            'confidence_percent',  
             'reviewer_notes',
             'created_at', 
             'updated_at'
@@ -340,7 +340,7 @@ class DisputeReviewSerializer(serializers.Serializer):
         manual_update = data.get('manual_update', False)
         re_verify = data.get('re_verify', True)
         
-        # ===== UNTUK ACTION APPROVE =====
+        # UNTUK ACTION APPROVE 
         if action == 'approve':
             if manual_update:
                 # Jika manual update, validasi required fields
@@ -352,8 +352,7 @@ class DisputeReviewSerializer(serializers.Serializer):
                     raise serializers.ValidationError({
                         'new_confidence': 'Confidence score wajib diisi jika manual_update=True'
                     })
-                # Summary optional untuk manual update
-                
+
                 # Jika manual update, disable re_verify
                 data['re_verify'] = False
             
@@ -363,19 +362,14 @@ class DisputeReviewSerializer(serializers.Serializer):
                     'non_field_errors': 'Untuk approve, pilih re_verify=True atau manual_update=True'
                 })
         
-        # ===== UNTUK ACTION REJECT =====
+        #  UNTUK ACTION REJECT 
         if action == 'reject':
-            # Untuk reject, abaikan manual_update dan re_verify
             data['re_verify'] = False
             data['manual_update'] = False
         
         return data
 
-
-# ===========================
 # Journal Article Serializers
-# ===========================
-
 class JournalArticleSerializer(serializers.ModelSerializer):
     """Serializer untuk menampilkan JournalArticle."""
     created_by_name = serializers.SerializerMethodField()
@@ -407,7 +401,6 @@ class JournalArticleSerializer(serializers.ModelSerializer):
         if obj.created_by:
             return obj.created_by.username
         return None
-
 
 class JournalArticleCreateSerializer(serializers.Serializer):
     """Serializer untuk membuat JournalArticle baru."""

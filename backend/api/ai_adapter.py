@@ -135,32 +135,19 @@ def is_health_related_claim(claim_text: str, summary: str = "") -> bool:
 def determine_verification_label(confidence_score: float, has_sources: bool = True, 
                                 has_journal: bool = False, claim_text: str = "", 
                                 summary: str = "") -> str:
-    """
-    FIXED: Label determination dengan threshold yang lebih reasonable.
+    """Penentuan label akhir berbasis confidence + keberadaan jurnal.
 
-    New Rules (RELAXED):
-    - Jika BUKAN klaim kesehatan DAN tidak ada sumber -> unverified
+    Aturan global:
+    - Jika BUKAN klaim kesehatan ATAU tidak ada jurnal terkait -> UNVERIFIED
+    - Jika klaim kesehatan DENGAN jurnal terkait:
+        * confidence <= 0.50  -> HOAX
+        * 0.50 < confidence < 0.75 -> UNCERTAIN
+        * confidence >= 0.75 -> VALID
     """
     try:
         c = float(confidence_score)
     except (TypeError, ValueError):
         c = 0.0
-
-    # Normalize confidence to 0.0–1.0
-    if c > 1.0 and c <= 100.0:
-        c /= 100.0
-    c = max(0.0, min(c, 1.0))
-
-    # Gabungkan teks klaim + ringkasan untuk heuristic sederhana
-    combined_text = f"{claim_text} {summary}".lower()
-
-    # Heuristic konsensus kuat: merokok/smoking menyebabkan kanker paru/lung cancer
-    if (
-        ("merokok" in combined_text or "smoking" in combined_text)
-        and ("kanker paru" in combined_text or "lung cancer" in combined_text)
-    ):
-        logger.info("[LABEL] -> VALID (strong-consensus heuristic: smoking causes lung cancer)")
-        return "valid"
 
     # Check if health-related
     is_health = is_health_related_claim(claim_text, summary)
@@ -169,23 +156,25 @@ def determine_verification_label(confidence_score: float, has_sources: bool = Tr
         f"[LABEL] Confidence: {c:.2f}, Has sources: {has_sources}, Has journal: {has_journal}, Is health: {is_health}"
     )
 
-    # RULE A: Jika BUKAN klaim kesehatan ATAU tidak ada jurnal/sumber -> TIDAK TERVERIFIKASI
-    if (not is_health) or (not has_sources):
-        logger.info("[LABEL] -> UNVERIFIED (non-health or no journal sources)")
+    # RULE A: Jika BUKAN klaim kesehatan ATAU tidak ada jurnal terkait -> UNVERIFIED
+    # Di sini kita mensyaratkan keberadaan jurnal (DOI / source_type='journal'),
+    # bukan hanya website biasa.
+    if (not is_health) or (not has_journal):
+        logger.info("[LABEL] -> UNVERIFIED (non-health topic or no journal sources)")
         return "unverified"
 
-    # RULE B: Klaim kesehatan dengan jurnal/sumber
-    #  - c >= 0.75  -> FAKTA (valid)
-    #  - c <= 0.55  -> HOAX
-    #  - 0.55 < c < 0.75 -> TIDAK PASTI (uncertain)
+    # RULE B: Klaim kesehatan dengan jurnal terkait
+    #  - c >= 0.75  -> VALID
+    #  - c <= 0.50  -> HOAX
+    #  - 0.50 < c < 0.75 -> UNCERTAIN
     if c >= 0.75:
         logger.info(f"[LABEL] -> VALID (confidence {c:.2f} >= 0.75)")
         return "valid"
-    if c <= 0.55:
-        logger.info(f"[LABEL] -> HOAX (confidence {c:.2f} <= 0.55)")
+    if c <= 0.50:
+        logger.info(f"[LABEL] -> HOAX (confidence {c:.2f} <= 0.50)")
         return "hoax"
 
-    logger.info(f"[LABEL] -> UNCERTAIN (0.55 < {c:.2f} < 0.75)")
+    logger.info(f"[LABEL] -> UNCERTAIN (0.50 < {c:.2f} < 0.75)")
     return "uncertain"
 
 def map_ai_label_to_backend(ai_label: str) -> str:
@@ -549,8 +538,8 @@ def call_ai_verify(claim_text: str, additional_evidence: Optional[Dict[str, Any]
     logger.info("="*80)
     
     try:
-        # Jika ada additional evidence, include dalam verification
-        if additional_evidence and additional_evidence.get('abstract'):
+        # Jika ada additional evidence (DOI/URL/abstract), selalu gunakan jalur with_evidence
+        if additional_evidence:
             result = call_ai_verify_with_evidence(claim_text, additional_evidence)
         else:
             result = call_ai_verify_direct_optimized(claim_text)

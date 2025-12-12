@@ -1,11 +1,3 @@
-"""
-Management command untuk merge duplicate claims yang sudah ada.
-
-Usage:
-    python manage.py merge_duplicate_claims --dry-run
-    python manage.py merge_duplicate_claims --execute
-"""
-
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from api.models import Claim, VerificationResult

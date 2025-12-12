@@ -1,4 +1,5 @@
 import logging
+from dotenv import load_dotenv
 from typing import List, Optional, Dict, Any
 from django.core.mail import send_mail, EmailMultiAlternatives
 from django.template.loader import render_to_string
@@ -6,13 +7,15 @@ from django.conf import settings
 from django.utils import timezone
 from .models import Dispute, Claim
 
+load_dotenv()
+
 logger = logging.getLogger(__name__)
 
 class EmailNotificationService:
     """Service untuk mengirim email notifications."""
     
     def __init__(self):
-        self.enabled = getattr(settings, 'ENABLE_EMAIL_NOTIFICATIONS', False)
+        self.enabled = getattr(settings, 'ENABLE_EMAIL_NOTIFICATIONS', True)
         self.from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', '')
         self.from_name = getattr(settings, 'NOTIFICATION_FROM_NAME', 'Healthify')
         self.admin_emails = getattr(settings, 'ADMIN_NOTIFICATION_EMAILS', [])
@@ -275,10 +278,17 @@ Healthify System
             vr = dispute.claim.verification_result
             claim_info = f"""
             
-    Hasil Verifikasi Terbaru:
-    - Label: {vr.get_label_display()}
-    - Confidence: {vr.confidence_percent()}%
-    - Summary: {vr.summary[:300]}...
+Hasil Verifikasi Terbaru:
+- Klaim: {dispute.claim_text}
+- Status: DITERIMA
+- Label: {vr.get_label_display()}
+- Tingkat Keyakinan: {vr.confidence_percent()}%
+- Ringkasan: {vr.summary[:300]}...
+
+Catatan Admin:
+{admin_notes}
+
+Terima kasih telah berkontribusi untuk memerangi misinformasi kesehatan.
             """
         
         message = f"""

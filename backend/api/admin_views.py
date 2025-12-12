@@ -11,6 +11,7 @@ from django.db import transaction
 from django.utils import timezone
 from django.http import Http404
 from django.conf import settings
+from semanticscholar import SemanticScholar
 
 # IMPORT MODELS 
 from .models import Claim, Source, Dispute, VerificationResult, ClaimSource
@@ -484,6 +485,9 @@ class AdminDisputeDetailView(APIView):
                     new_summary=validated_data.get('new_summary')
                 )
                 
+                # Trigger pipeline
+                self._trigger_pipeline(dispute)
+                
             # ====== HANDLE REJECT ======
             else:  # action == 'reject'
                 result = self._handle_reject(
@@ -506,297 +510,536 @@ class AdminDisputeDetailView(APIView):
                 'detail': str(e) if settings.DEBUG else None
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    def _handle_approve(self, dispute: Dispute, request, review_note: str,
-                       manual_update: bool = False, re_verify: bool = True,
-                       new_label: str = None, new_confidence: float = None,
-                       new_summary: str = None) -> Dict[str, Any]:
+    def _trigger_pipeline(self, dispute):
         """
-        Handle dispute approval dengan update verification result.
+        Trigger the processing pipeline for DOI parsing and verification
         
         Flow:
-        1. Jika manual_update: update langsung dengan data yang diberikan
-        2. Jika re_verify: panggil AI untuk re-verify dengan data baru
-        3. Update dispute status
-        4. Kirim email ke user
+        1. Ambil evidence dari DOI/URL yang diberikan user
+        2. Tambahkan sebagai source baru
+        3. Jalankan pipeline verifikasi
+        4. Update verification result
+        5. Cari jurnal serupa
+        6. Kirim notifikasi
         """
-        logger.info(f"[APPROVE] Starting approval for dispute {dispute.id}")
+        logger.info(f"[PIPELINE] Memulai pipeline untuk dispute {dispute.id}")
         
-        # Update dispute status
-        dispute.status = Dispute.STATUS_APPROVED
-        dispute.reviewed = True
-        dispute.reviewed_by = request.user
-        dispute.reviewed_at = timezone.now()
-        dispute.review_note = review_note
-        dispute.save()
-        
-        logger.info(f"[APPROVE] Dispute {dispute.id} status updated to APPROVED")
-        
-        # Get or create verification result
-        if dispute.claim:
-            verification, created = VerificationResult.objects.get_or_create(
-                claim=dispute.claim
-            )
+        try:
+            # 1. Ambil evidence dari DOI/URL yang diberikan user
+            evidence = None
+            if dispute.supporting_doi:
+                logger.info(f"[PIPELINE] Mengambil evidence dari DOI: {dispute.supporting_doi}")
+                evidence = fetch_evidence_from_doi(dispute.supporting_doi)
+            elif dispute.supporting_url:
+                logger.info(f"[PIPELINE] Mengambil evidence dari URL: {dispute.supporting_url}")
+                evidence = fetch_evidence_from_url(dispute.supporting_url)
             
-            # ====== MANUAL UPDATE ======
-            if manual_update and new_label and new_confidence is not None:
-                logger.info(f"[APPROVE] Manual update: label={new_label}, conf={new_confidence}")
-                
-                verification.label = new_label
-                verification.confidence = new_confidence if new_label != 'unverified' else None
-                verification.summary = new_summary or verification.summary
-                verification.reviewer_notes = f"Admin approved dispute #{dispute.id}\n{review_note}"
-                verification.save()
-                
-                logger.info(f"[APPROVE] VerificationResult {verification.id} updated manually")
-                
-                updated_via = "manual_admin_update"
-                final_label = new_label
-                final_confidence = new_confidence
-                final_summary = new_summary
+            # 2. Tambahkan sebagai source baru
+            if evidence and dispute.claim:
+                self._add_user_evidence_as_source(dispute.claim, evidence)
+                logger.info("[PIPELINE] Evidence user berhasil ditambahkan sebagai source")
             
-            # ====== RE-VERIFY WITH AI + USER EVIDENCE ======
-            elif re_verify:
-                logger.info(f"[APPROVE] Re-verifying claim with AI and user evidence...")
+            # 3. Jalankan pipeline verifikasi
+            if dispute.claim:
+                logger.info("[PIPELINE] Memulai proses verifikasi...")
+                from .ai_adapter import call_ai_verify
                 
+                # Panggil AI untuk memverifikasi ulang dengan evidence tambahan
+                ai_result = call_ai_verify(
+                    claim_text=dispute.claim.text,
+                    additional_evidence=evidence
+                )
+                
+                # 4. Update verification result
+                if ai_result and 'label' in ai_result:
+                    verification, _ = VerificationResult.objects.get_or_create(
+                        claim=dispute.claim
+                    )
+                    verification.label = ai_result['label']
+                    verification.confidence = ai_result.get('confidence')
+                    verification.summary = ai_result.get('summary', '')
+                    verification.reviewer_notes = f"Diperbarui oleh sistem setelah verifikasi ulang untuk dispute #{dispute.id}"
+                    verification.save()
+                    
+                    logger.info(f"[PIPELINE] Verifikasi selesai. Hasil: {ai_result['label']} (confidence: {ai_result.get('confidence')})")
+                    
+                    # 5. Cari jurnal serupa untuk referensi tambahan
+                    self._fetch_similar_journals(dispute.claim)
+                    
+                    # 6. Kirim notifikasi ke admin
+                    try:
+                        from .email_service import email_service
+                        email_service.notify_admin_dispute_processed(dispute)
+                        logger.info("[EMAIL] Notifikasi verifikasi ulang terkirim ke admin")
+                    except Exception as e:
+                        logger.error(f"[EMAIL] Gagal mengirim notifikasi ke admin: {str(e)}", exc=True)
+                    
+                    return True
+                
+        except Exception as e:
+            logger.error(f"[PIPELINE] Error saat memproses pipeline: {str(e)}", exc_info=True)
+            
+            # Kirim notifikasi error ke admin
+            try:
+                from .email_service import email_service
+                email_service.notify_admin_system_error(
+                    error_type="Pipeline Error",
+                    error_message=f"Gagal memproses pipeline untuk dispute #{dispute.id}",
+                    context={"error": str(e), "dispute_id": dispute.id}
+                )
+            except Exception as email_err:
+                logger.error(f"[EMAIL] Gagal mengirim notifikasi error: {str(email_err)}")
+        
+        logger.info(f"[PIPELINE] Proses pipeline selesai untuk dispute {dispute.id}")
+        return False
+
+    def _fetch_similar_journals(self, claim, max_retries=3, initial_delay=1):
+        """Fetch similar journals with rate limiting and retries."""
+        logger.info(f"[JOURNAL_FETCH] Starting journal search for claim {claim.id}")
+        
+        def make_request(attempt):
+            try:
+                sch = SemanticScholar(timeout=10)
+                search_query = claim.text[:200]
+                logger.info(f"[JOURNAL_FETCH] Attempt {attempt + 1}: Searching for: {search_query[:50]}...")
+                return sch.search_paper(search_query, limit=2)  # Reduced to 2 results
+            except Exception as e:
+                if "429" in str(e) and attempt < max_retries - 1:
+                    wait_time = initial_delay * (2 ** attempt)  # Exponential backoff
+                    logger.warning(f"[JOURNAL_FETCH] Rate limited. Waiting {wait_time}s before retry...")
+                    time.sleep(wait_time)
+                    return None
+                raise
+
+        try:
+            if not claim.text or len(claim.text.strip()) < 3:
+                logger.warning("[JOURNAL_FETCH] Claim text too short")
+                return False
+
+            # Try with retries
+            results = None
+            for attempt in range(max_retries):
                 try:
-                    # ====== FETCH EVIDENCE FROM USER'S DOI/URL ======
-                    additional_evidence = None
-                    
-                    if dispute.supporting_doi:
-                        logger.info(f"[APPROVE] Fetching evidence from DOI: {dispute.supporting_doi}")
-                        additional_evidence = fetch_evidence_from_doi(dispute.supporting_doi)
-                        
-                    elif dispute.supporting_url:
-                        logger.info(f"[APPROVE] Fetching evidence from URL: {dispute.supporting_url}")
-                        additional_evidence = fetch_evidence_from_url(dispute.supporting_url)
-                    
-                    if additional_evidence:
-                        logger.info(f"[APPROVE] Evidence fetched: {additional_evidence.get('title', 'N/A')[:50]}")
-                    
-                    # ====== CALL AI WITH EVIDENCE ======
-                    ai_result = call_ai_verify(dispute.claim.text, additional_evidence=additional_evidence)
-                    normalized = normalize_ai_response(ai_result, claim_text=dispute.claim.text)
-                    
-                    logger.info(f"[APPROVE] AI re-verify result: {normalized['label']}")
-                    
-                    # Update verification result dengan hasil AI baru
-                    verification.label = normalized['label']
-                    verification.confidence = normalized['confidence']
-                    verification.summary = normalized['summary']
-                    
-                    # Add note about evidence used
-                    evidence_note = ""
-                    if additional_evidence and additional_evidence.get('title'):
-                        evidence_note = f"\n📎 Evidence used: {additional_evidence.get('title', 'N/A')[:100]}"
-                    
-                    verification.reviewer_notes = f"Admin approved dispute #{dispute.id} with re-verification{evidence_note}\n{review_note}"
-                    verification.save()
-                    
-                    # Update sources jika ada
-                    if normalized['sources']:
-                        self._update_claim_sources(dispute.claim, normalized['sources'])
-                    
-                    # Jika ada evidence dari user, tambahkan juga sebagai Source
-                    if additional_evidence and additional_evidence.get('doi'):
-                        self._add_user_evidence_as_source(dispute.claim, additional_evidence)
-                    
-                    logger.info(f"[APPROVE] VerificationResult {verification.id} updated with AI re-verify + user evidence")
-                    
-                    updated_via = "ai_reverify_with_evidence" if additional_evidence else "ai_reverify"
-                    final_label = normalized['label']
-                    final_confidence = normalized['confidence']
-                    final_summary = normalized['summary']
-                    
+                    results = make_request(attempt)
+                    if results is not None:
+                        break
                 except Exception as e:
-                    logger.error(f"[APPROVE] AI re-verify failed: {str(e)}")
-                    # Fallback: gunakan manual data jika ada, atau keep original
-                    if manual_update and new_label:
-                        verification.label = new_label
-                        verification.confidence = new_confidence if new_label != 'unverified' else None
-                        verification.summary = new_summary or verification.summary
-                    verification.reviewer_notes = f"Admin approved dispute #{dispute.id} (AI re-verify failed)\n{review_note}"
+                    if attempt == max_retries - 1:
+                        raise
+
+            if not results:
+                logger.warning("[JOURNAL_FETCH] No results after retries")
+                return False
+
+            similar_journals = []
+            for paper in results:
+                try:
+                    if getattr(paper, 'url', None):
+                        journal = {
+                            'title': getattr(paper, 'title', 'No title'),
+                            'doi': getattr(paper, 'doi', ''),
+                            'url': paper.url,
+                            'abstract': getattr(paper, 'abstract', '')[:300],  # Limit abstract length
+                            'relevance_score': 0.8,
+                            'source_type': 'journal'
+                        }
+                        similar_journals.append(journal)
+                        logger.info(f"[JOURNAL_FETCH] Found: {journal['title'][:50]}...")
+                except Exception as e:
+                    logger.warning(f"[JOURNAL_FETCH] Error processing paper: {str(e)[:100]}")
+
+            return bool(similar_journals and self._update_claim_sources(claim, similar_journals))
+
+        except Exception as e:
+            logger.error(f"[JOURNAL_FETCH] Failed after {max_retries} attempts: {str(e)}")
+            return False
+
+    def _trigger_pipeline(self, dispute):
+        """Process the claim verification pipeline with better error handling."""
+        logger.info(f"[PIPELINE] Starting pipeline for dispute {dispute.id}")
+        
+        if not dispute.claim:
+            logger.warning("[PIPELINE] No claim associated")
+            return False
+
+        try:
+            # 1. Get evidence (with timeout)
+            evidence = None
+            try:
+                if dispute.supporting_doi:
+                    evidence = fetch_evidence_from_doi(dispute.supporting_doi)
+                elif dispute.supporting_url:
+                    evidence = fetch_evidence_from_url(dispute.supporting_url)
+            except Exception as e:
+                logger.error(f"[PIPELINE] Error fetching evidence: {str(e)}")
+                evidence = None
+
+            # 2. Add evidence as source if available
+            if evidence:
+                try:
+                    self._add_user_evidence_as_source(dispute.claim, evidence)
+                    logger.info("[PIPELINE] Added evidence as source")
+                except Exception as e:
+                    logger.error(f"[PIPELINE] Error adding evidence: {str(e)}")
+
+            # 3. Run verification
+            logger.info("[PIPELINE] Starting verification...")
+            try:
+                from .ai_adapter import call_ai_verify
+                ai_result = call_ai_verify(
+                    claim_text=dispute.claim.text,
+                    additional_evidence=evidence
+                )
+
+                if not ai_result or 'label' not in ai_result:
+                    logger.error("[PIPELINE] Invalid AI verification result")
+                    return False
+
+                # Update verification result
+                verification, _ = VerificationResult.objects.get_or_create(
+                    claim=dispute.claim
+                )
+                verification.label = ai_result['label']
+                verification.confidence = ai_result.get('confidence', 0)
+                verification.summary = ai_result.get('summary', '')[:1000]  # Limit length
+                verification.reviewer_notes = f"Updated by system after dispute #{dispute.id}"
+                verification.save()
+
+                # 4. Fetch similar journals in background
+                import threading
+                threading.Thread(
+                    target=self._fetch_similar_journals,
+                    args=(dispute.claim,),
+                    daemon=True
+                ).start()
+
+                logger.info("[PIPELINE] Verification complete")
+                return True
+
+            except Exception as e:
+                logger.error(f"[PIPELINE] Verification failed: {str(e)}", exc_info=True)
+                return False
+
+        except Exception as e:
+            logger.error(f"[PIPELINE] Pipeline failed: {str(e)}", exc_info=True)
+            return False
+            
+        def _handle_approve(self, dispute: Dispute, request, review_note: str,
+                        manual_update: bool = False, re_verify: bool = True,
+                        new_label: str = None, new_confidence: float = None,
+                        new_summary: str = None) -> Dict[str, Any]:
+            """
+            Handle dispute approval dengan update verification result.
+            
+            Flow:
+            1. Jika manual_update: update langsung dengan data yang diberikan
+            2. Jika re_verify: panggil AI untuk re-verify dengan data baru
+            3. Update dispute status
+            4. Kirim email ke user
+            """
+            logger.info(f"[APPROVE] Starting approval for dispute {dispute.id}")
+            
+            # Update dispute status
+            dispute.status = Dispute.STATUS_APPROVED
+            dispute.reviewed = True
+            dispute.reviewed_by = request.user
+            dispute.reviewed_at = timezone.now()
+            dispute.review_note = review_note
+            dispute.save()
+            
+            logger.info(f"[APPROVE] Dispute {dispute.id} status updated to APPROVED")
+            
+            # Get or create verification result
+            if dispute.claim:
+                verification, created = VerificationResult.objects.get_or_create(
+                    claim=dispute.claim
+                )
+
+                # Kirim notifikasi ke user
+                try:
+                    from .email_service import email_service
+                    email_service.notify_user_dispute_approved(dispute, review_note)
+                    logger.info(f"[EMAIL] Notification sent to {dispute.reporter_email}")
+                except Exception as e:
+                    logger.error(f"[EMAIL] Failed to send approval email: {str(e)}", exc_info=True)
+                
+                # MANUAL UPDATE 
+                if manual_update and new_label and new_confidence is not None:
+                    logger.info(f"[APPROVE] Manual update: label={new_label}, conf={new_confidence}")
+                    
+                    verification.label = new_label
+                    verification.confidence = new_confidence if new_label != 'unverified' else None
+                    # Jangan override ringkasan AI jika admin tidak mengisi new_summary
+                    verification.summary = new_summary or verification.summary
+                    verification.reviewer_notes = f"Admin approved dispute #{dispute.id}\n{review_note}"
                     verification.save()
                     
-                    updated_via = "manual_fallback"
+                    # Jika user menyertakan DOI/URL, simpan juga sebagai Source agar muncul di frontend
+                    try:
+                        evidence = None
+                        if dispute.supporting_doi:
+                            logger.info(f"[APPROVE] (manual) Fetching evidence from DOI: {dispute.supporting_doi}")
+                            evidence = fetch_evidence_from_doi(dispute.supporting_doi)
+                        elif dispute.supporting_url:
+                            logger.info(f"[APPROVE] (manual) Fetching evidence from URL: {dispute.supporting_url}")
+                            evidence = fetch_evidence_from_url(dispute.supporting_url)
+
+                        if evidence:
+                            self._add_user_evidence_as_source(dispute.claim, evidence)
+                            logger.info("[APPROVE] (manual) User evidence linked as source")
+                    except Exception as e:
+                        logger.error(f"[APPROVE] (manual) Failed to add user evidence as source: {str(e)}")
+
+                    logger.info(f"[APPROVE] VerificationResult {verification.id} updated manually")
+                    
+                    updated_via = "manual_admin_update"
+                    final_label = new_label
+                    final_confidence = new_confidence
+                    final_summary = verification.summary
+                
+                # ====== RE-VERIFY WITH AI + USER EVIDENCE ======
+                elif re_verify:
+                    logger.info(f"[APPROVE] Re-verifying claim with AI and user evidence...")
+                    
+                    try:
+                        # ====== FETCH EVIDENCE FROM USER'S DOI/URL ======
+                        additional_evidence = None
+                        
+                        if dispute.supporting_doi:
+                            logger.info(f"[APPROVE] Fetching evidence from DOI: {dispute.supporting_doi}")
+                            additional_evidence = fetch_evidence_from_doi(dispute.supporting_doi)
+                            
+                        elif dispute.supporting_url:
+                            logger.info(f"[APPROVE] Fetching evidence from URL: {dispute.supporting_url}")
+                            additional_evidence = fetch_evidence_from_url(dispute.supporting_url)
+                        
+                        if additional_evidence:
+                            logger.info(f"[APPROVE] Evidence fetched: {additional_evidence.get('title', 'N/A')[:50]}")
+                        
+                        # ====== CALL AI WITH EVIDENCE ======
+                        ai_result = call_ai_verify(dispute.claim.text, additional_evidence=additional_evidence)
+                        normalized = normalize_ai_response(ai_result, claim_text=dispute.claim.text)
+                        
+                        logger.info(f"[APPROVE] AI re-verify result: {normalized['label']}")
+                        
+                        # Update verification result dengan hasil AI baru
+                        verification.label = normalized['label']
+                        verification.confidence = normalized['confidence']
+                        verification.summary = normalized['summary']
+                        
+                        # Add note about evidence used
+                        evidence_note = ""
+                        if additional_evidence and additional_evidence.get('title'):
+                            evidence_note = f"\n📎 Evidence used: {additional_evidence.get('title', 'N/A')[:100]}"
+                        
+                        verification.reviewer_notes = f"Admin approved dispute #{dispute.id} with re-verification{evidence_note}\n{review_note}"
+                        verification.save()
+                        
+                        # Update sources jika ada
+                        if normalized['sources']:
+                            self._update_claim_sources(dispute.claim, normalized['sources'])
+                        
+                        # Jika ada evidence dari user, tambahkan juga sebagai Source
+                        if additional_evidence and additional_evidence.get('doi'):
+                            self._add_user_evidence_as_source(dispute.claim, additional_evidence)
+                        
+                        logger.info(f"[APPROVE] VerificationResult {verification.id} updated with AI re-verify + user evidence")
+                        
+                        updated_via = "ai_reverify_with_evidence" if additional_evidence else "ai_reverify"
+                        final_label = normalized['label']
+                        final_confidence = normalized['confidence']
+                        final_summary = normalized['summary']
+                        
+                    except Exception as e:
+                        logger.error(f"[APPROVE] AI re-verify failed: {str(e)}")
+                        # Fallback: gunakan manual data jika ada, atau keep original
+                        if manual_update and new_label:
+                            verification.label = new_label
+                            verification.confidence = new_confidence if new_label != 'unverified' else None
+                            verification.summary = new_summary or verification.summary
+                        verification.reviewer_notes = f"Admin approved dispute #{dispute.id} (AI re-verify failed)\n{review_note}"
+                        verification.save()
+                        
+                        updated_via = "manual_fallback"
+                        final_label = verification.label
+                        final_confidence = verification.confidence
+                        final_summary = verification.summary
+                
+                else:
+                    # Neither manual nor re-verify - keep original
+                    updated_via = "no_update"
                     final_label = verification.label
                     final_confidence = verification.confidence
                     final_summary = verification.summary
             
             else:
-                # Neither manual nor re-verify - keep original
-                updated_via = "no_update"
-                final_label = verification.label
-                final_confidence = verification.confidence
-                final_summary = verification.summary
-        
-        else:
-            # Dispute tidak linked ke claim - hanya update dispute
-            logger.warning(f"[APPROVE] Dispute {dispute.id} not linked to any claim")
-            updated_via = "no_claim"
-            final_label = dispute.original_label
-            final_confidence = dispute.original_confidence
-            final_summary = ""
-        
-        # ====== SEND EMAIL NOTIFICATION ======
-        email_sent = False
-        if dispute.reporter_email:
-            try:
-                email_sent = email_service.notify_user_dispute_approved(
-                    dispute=dispute,
-                    admin_notes=review_note
-                )
-                logger.info(f"[APPROVE] Email sent to {dispute.reporter_email}")
-            except Exception as e:
-                logger.error(f"[APPROVE] Failed to send email: {str(e)}")
-        
-        logger.info(f"[APPROVE] Dispute {dispute.id} approval completed")
-        
-        return {
-            'message': f'Dispute #{dispute.id} telah di-approve',
-            'dispute_id': dispute.id,
-            'status': dispute.status,
-            'updated_via': updated_via,
-            'verification_update': {
-                'label': final_label,
-                'confidence': final_confidence,
-                'summary': final_summary[:200] + '...' if final_summary and len(final_summary) > 200 else final_summary
-            },
-            'email_sent': email_sent,
-            'reviewed_at': dispute.reviewed_at.isoformat() if dispute.reviewed_at else None
-        }
-
-    def _handle_reject(self, dispute: Dispute, request, review_note: str) -> Dict[str, Any]:
-        """
-        Handle dispute rejection - tidak ada perubahan ke verification result.
-        """
-        logger.info(f"[REJECT] Starting rejection for dispute {dispute.id}")
-        
-        # Update dispute status
-        dispute.status = Dispute.STATUS_REJECTED
-        dispute.reviewed = True
-        dispute.reviewed_by = request.user
-        dispute.reviewed_at = timezone.now()
-        dispute.review_note = review_note
-        dispute.save()
-        
-        logger.info(f"[REJECT] Dispute {dispute.id} status updated to REJECTED")
-        
-        # ====== SEND EMAIL NOTIFICATION ======
-        email_sent = False
-        if dispute.reporter_email:
-            try:
-                email_sent = email_service.notify_user_dispute_rejected(
-                    dispute=dispute,
-                    admin_notes=review_note
-                )
-                logger.info(f"[REJECT] Email sent to {dispute.reporter_email}")
-            except Exception as e:
-                logger.error(f"[REJECT] Failed to send email: {str(e)}")
-        
-        logger.info(f"[REJECT] Dispute {dispute.id} rejection completed")
-        
-        return {
-            'message': f'Dispute #{dispute.id} telah di-reject',
-            'dispute_id': dispute.id,
-            'status': dispute.status,
-            'reason': 'Laporan ditolak. Verification result original tetap berlaku.',
-            'email_sent': email_sent,
-            'reviewed_at': dispute.reviewed_at.isoformat() if dispute.reviewed_at else None
-        }
-
-    def _update_claim_sources(self, claim: Claim, new_sources: List[Dict[str, Any]]):
-        """Update sources untuk klaim berdasarkan hasil AI."""
-        try:
-            # Clear existing sources
-            ClaimSource.objects.filter(claim=claim).delete()
-            logger.info(f"[SOURCES] Cleared old sources for claim {claim.id}")
+                # Dispute tidak linked ke claim - hanya update dispute
+                logger.warning(f"[APPROVE] Dispute {dispute.id} not linked to any claim")
+                updated_via = "no_claim"
+                final_label = dispute.original_label
+                final_confidence = dispute.original_confidence
+                final_summary = ""
             
-            # Add new sources
-            for idx, source_data in enumerate(new_sources):
-                # Get or create source
-                doi = (source_data.get('doi') or '').strip()
-                url = (source_data.get('url') or '').strip()
+            # ====== SEND EMAIL NOTIFICATION ======
+            email_sent = False
+            if dispute.reporter_email:
+                try:
+                    email_sent = email_service.notify_user_dispute_approved(
+                        dispute=dispute,
+                        admin_notes=review_note
+                    )
+                    logger.info(f"[APPROVE] Email sent to {dispute.reporter_email}")
+                except Exception as e:
+                    logger.error(f"[APPROVE] Failed to send email: {str(e)}")
+            
+            logger.info(f"[APPROVE] Dispute {dispute.id} approval completed")
+            
+            return {
+                'message': f'Dispute #{dispute.id} telah di-approve',
+                'dispute_id': dispute.id,
+                'status': dispute.status,
+                'updated_via': updated_via,
+                'verification_update': {
+                    'label': final_label,
+                    'confidence': final_confidence,
+                    'summary': final_summary[:200] + '...' if final_summary and len(final_summary) > 200 else final_summary
+                },
+                'email_sent': email_sent,
+                'reviewed_at': dispute.reviewed_at.isoformat() if dispute.reviewed_at else None
+            }
+
+        def _handle_reject(self, dispute: Dispute, request, review_note: str) -> Dict[str, Any]:
+            """
+            Handle dispute rejection - tidak ada perubahan ke verification result.
+            """
+            logger.info(f"[REJECT] Starting rejection for dispute {dispute.id}")
+            
+            # Update dispute status
+            dispute.status = Dispute.STATUS_REJECTED
+            dispute.reviewed = True
+            dispute.reviewed_by = request.user
+            dispute.reviewed_at = timezone.now()
+            dispute.review_note = review_note
+            dispute.save()
+            
+            logger.info(f"[REJECT] Dispute {dispute.id} status updated to REJECTED")
+            
+            # ====== SEND EMAIL NOTIFICATION ======
+            email_sent = False
+            if dispute.reporter_email:
+                try:
+                    email_sent = email_service.notify_user_dispute_rejected(
+                        dispute=dispute,
+                        admin_notes=review_note
+                    )
+                    logger.info(f"[REJECT] Email sent to {dispute.reporter_email}")
+                except Exception as e:
+                    logger.error(f"[REJECT] Failed to send email: {str(e)}")
+            
+            logger.info(f"[REJECT] Dispute {dispute.id} rejection completed")
+            
+            return {
+                'message': f'Dispute #{dispute.id} telah di-reject',
+                'dispute_id': dispute.id,
+                'status': dispute.status,
+                'reason': 'Laporan ditolak. Verification result original tetap berlaku.',
+                'email_sent': email_sent,
+                'reviewed_at': dispute.reviewed_at.isoformat() if dispute.reviewed_at else None
+            }
+
+        def _update_claim_sources(self, claim: Claim, new_sources: List[Dict[str, Any]]):
+            """Update sources untuk klaim berdasarkan hasil AI."""
+            try:
+                # Clear existing sources
+                ClaimSource.objects.filter(claim=claim).delete()
+                logger.info(f"[SOURCES] Cleared old sources for claim {claim.id}")
                 
-                source = None
-                if doi:
-                    source = Source.objects.filter(doi=doi).first()
-                elif url:
-                    source = Source.objects.filter(url=url).first()
-                
-                if not source:
-                    source = Source.objects.create(
-                        title=source_data.get('title', 'Unknown')[:500],
-                        doi=doi if doi else None,
-                        url=url if url else None,
-                        source_type=source_data.get('source_type', 'journal'),
-                        credibility_score=source_data.get('relevance_score', 0.5)
+                # Add new sources
+                for idx, source_data in enumerate(new_sources):
+                    # Get or create source
+                    doi = (source_data.get('doi') or '').strip()
+                    url = (source_data.get('url') or '').strip()
+                    
+                    source = None
+                    if doi:
+                        source = Source.objects.filter(doi=doi).first()
+                    elif url:
+                        source = Source.objects.filter(url=url).first()
+                    
+                    if not source:
+                        source = Source.objects.create(
+                            title=source_data.get('title', 'Unknown')[:500],
+                            doi=doi if doi else None,
+                            url=url if url else None,
+                            source_type=source_data.get('source_type', 'journal'),
+                            credibility_score=source_data.get('relevance_score', 0.5)
+                        )
+                    
+                    # Create claim-source link
+                    ClaimSource.objects.create(
+                        claim=claim,
+                        source=source,
+                        relevance_score=source_data.get('relevance_score', 0.0),
+                        excerpt=source_data.get('excerpt', ''),
+                        rank=idx
                     )
                 
-                # Create claim-source link
-                ClaimSource.objects.create(
+                logger.info(f"[SOURCES] Added {len(new_sources)} new sources for claim {claim.id}")
+            
+            except Exception as e:
+                logger.error(f"[SOURCES] Error updating sources: {str(e)}")
+
+        def _add_user_evidence_as_source(self, claim: Claim, evidence: Dict[str, Any]):
+            """
+            Tambahkan evidence dari user dispute sebagai Source baru.
+            Evidence ini akan ditandai dengan credibility score tinggi karena dari user.
+            """
+            try:
+                doi = (evidence.get('doi') or '').strip()
+                url = (evidence.get('url') or '').strip()
+                
+                if not doi and not url:
+                    logger.warning("[USER_EVIDENCE] No DOI or URL in evidence, skipping")
+                    return
+                
+                # Check if source already exists
+                existing = None
+                if doi:
+                    existing = Source.objects.filter(doi=doi).first()
+                elif url:
+                    existing = Source.objects.filter(url=url).first()
+                
+                if existing:
+                    logger.info(f"[USER_EVIDENCE] Source already exists: {existing.id}")
+                    source = existing
+                else:
+                    # Create new source
+                    source = Source.objects.create(
+                        title=evidence.get('title', 'User Submitted Evidence')[:500],
+                        doi=doi if doi else None,
+                        url=url if url else None,
+                        authors=evidence.get('authors', ''),
+                        publisher=evidence.get('publisher', ''),
+                        source_type='journal',
+                        credibility_score=0.85  # High credibility untuk user-submitted
+                    )
+                    logger.info(f"[USER_EVIDENCE] Created new source: {source.id}")
+                
+                # Link to claim with high relevance
+                ClaimSource.objects.get_or_create(
                     claim=claim,
                     source=source,
-                    relevance_score=source_data.get('relevance_score', 0.0),
-                    excerpt=source_data.get('excerpt', ''),
-                    rank=idx
+                    defaults={
+                        'relevance_score': 0.95,
+                        'excerpt': evidence.get('abstract', '')[:500],
+                        'rank': 0  # Top rank
+                    }
                 )
-            
-            logger.info(f"[SOURCES] Added {len(new_sources)} new sources for claim {claim.id}")
-        
-        except Exception as e:
-            logger.error(f"[SOURCES] Error updating sources: {str(e)}")
-
-    def _add_user_evidence_as_source(self, claim: Claim, evidence: Dict[str, Any]):
-        """
-        Tambahkan evidence dari user dispute sebagai Source baru.
-        Evidence ini akan ditandai dengan credibility score tinggi karena dari user.
-        """
-        try:
-            doi = (evidence.get('doi') or '').strip()
-            url = (evidence.get('url') or '').strip()
-            
-            if not doi and not url:
-                logger.warning("[USER_EVIDENCE] No DOI or URL in evidence, skipping")
-                return
-            
-            # Check if source already exists
-            existing = None
-            if doi:
-                existing = Source.objects.filter(doi=doi).first()
-            elif url:
-                existing = Source.objects.filter(url=url).first()
-            
-            if existing:
-                logger.info(f"[USER_EVIDENCE] Source already exists: {existing.id}")
-                source = existing
-            else:
-                # Create new source
-                source = Source.objects.create(
-                    title=evidence.get('title', 'User Submitted Evidence')[:500],
-                    doi=doi if doi else None,
-                    url=url if url else None,
-                    authors=evidence.get('authors', ''),
-                    publisher=evidence.get('publisher', ''),
-                    source_type='journal',
-                    credibility_score=0.85  # High credibility untuk user-submitted
-                )
-                logger.info(f"[USER_EVIDENCE] Created new source: {source.id}")
-            
-            # Link to claim with high relevance
-            ClaimSource.objects.get_or_create(
-                claim=claim,
-                source=source,
-                defaults={
-                    'relevance_score': 0.95,
-                    'excerpt': evidence.get('abstract', '')[:500],
-                    'rank': 0  # Top rank
-                }
-            )
-            
-            logger.info(f"[USER_EVIDENCE] Linked source {source.id} to claim {claim.id}")
-            
-        except Exception as e:
-            logger.error(f"[USER_EVIDENCE] Error adding user evidence: {str(e)}")
+                
+                logger.info(f"[USER_EVIDENCE] Linked source {source.id} to claim {claim.id}")
+                
+            except Exception as e:
+                logger.error(f"[USER_EVIDENCE] Error adding user evidence: {str(e)}")
 
             
 class AdminSourceListView(APIView):
@@ -1079,4 +1322,3 @@ class AdminSourceStatsView(APIView):
             return Response({
                 'error': 'Failed to fetch source stats'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-

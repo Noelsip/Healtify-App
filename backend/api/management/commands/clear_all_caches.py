@@ -1,12 +1,3 @@
-"""
-Django Management Command untuk clear ALL caches.
-
-Usage:
-    python manage.py clear_all_caches
-    python manage.py clear_all_caches --type=llm
-    python manage.py clear_all_caches --type=embedding
-"""
-
 from django.core.management.base import BaseCommand
 from pathlib import Path
 import shutil

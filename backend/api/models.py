@@ -239,7 +239,34 @@ class Dispute(models.Model):
     
     def __str__(self):
         return f"Dispute #{self.id} - {self.status}"
-   
+
+# Model untuk menyimpan laporan dari user
+class UserReport(models.Model):
+    STATUS_PENDING = 'pending'
+    STATUS_APPROVED = 'approved'
+    STATUS_REJECTED = 'rejected'
+    
+    STATUS_CHOICES = [
+        (STATUS_PENDING, 'Pending Review'),
+        (STATUS_APPROVED, 'Approved'),
+        (STATUS_REJECTED, 'Rejected'),
+    ]
+
+    claim_text = models.TextField(help_text="Teks klaim yang dilaporkan oleh user")
+    supporting_doi = models.CharField(max_length=500, blank=True, default='', help_text="DOI link sebagai bukti")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    created_at = models.DateTimeField(auto_now_add=True)
+    # Link to the processed claim once approved
+    processed_claim = models.ForeignKey(Claim, on_delete=models.SET_NULL, null=True, blank=True, related_name='user_reports')
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'User Report'
+        verbose_name_plural = 'User Reports'
+
+    def __str__(self):
+        return f"User Report #{self.id} - {self.claim_text[:50]}... ({self.status})"
+
 # Model untuk FAQ dinamis
 class FAQItem(models.Model):
     question = models.CharField(max_length=500)

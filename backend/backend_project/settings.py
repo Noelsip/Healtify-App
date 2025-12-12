@@ -29,8 +29,12 @@ ADMIN_NOTIFICATION_EMAILS = os.getenv('ADMIN_NOTIFICATION_EMAILS', '').split(','
 ADMIN_NOTIFICATION_EMAILS = [email.strip() for email in ADMIN_NOTIFICATION_EMAILS if email.strip()]
 
 # Notification settings
-ENABLE_EMAIL_NOTIFICATIONS = False
+ENABLE_EMAIL_NOTIFICATIONS = os.getenv('ENABLE_EMAIL_NOTIFICATIONS', 'True') == 'True'
 NOTIFICATION_FROM_NAME = os.getenv('NOTIFICATION_FROM_NAME', 'Healthify System')
+
+# For development - use console email backend
+if os.getenv('DEBUG', 'True') == 'True':
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-default-key-change-this-in-production')

@@ -2,7 +2,7 @@ import { AlertCircle, ArrowLeft, Bot, Calendar, CheckCircle2, Clock, FileText, F
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://api.healthify.cloud/api' || 'http://localhost:8000/api';
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://api.healthify.cloud/api';
 
 const AdminDisputes = () => {
     const navigate = useNavigate();
@@ -616,7 +616,7 @@ const DisputeModal = ({ dispute, onClose, onAction, loading }) => {
                                 </p>
                                 {dispute.review_note && (
                                     <p className="text-sm text-gray-600 mt-2">
-                                        <strong>Notes:</strong> {dispute.review_note} {/* ✅ UBAH: admin_notes → review_note */}
+                                        <strong>Notes:</strong> {dispute.review_note}
                                     </p>
                                 )}
                                 {dispute.reviewed_at && (

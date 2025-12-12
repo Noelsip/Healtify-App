@@ -437,6 +437,86 @@ class AdminDisputeDetailView(APIView):
                 'error': 'Failed to fetch dispute details'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    def _handle_approve(self, dispute, request, review_note, manual_update, re_verify, new_label=None, new_confidence=None, new_summary=None):
+        """Handle approve action for a dispute"""
+        logger.info(f"[ADMIN_DISPUTE_APPROVE] Approving dispute {dispute.id}")
+        
+        # Update dispute status
+        dispute.status = Dispute.STATUS_APPROVED
+        dispute.reviewed_by = request.user
+        dispute.reviewed_at = timezone.now()
+        dispute.review_note = review_note
+        dispute.save()
+        
+        # If manual update is requested, update the verification result
+        if manual_update and new_label:
+            verification = dispute.claim.verification_result
+            if verification:
+                verification.label = new_label
+                if new_confidence is not None:
+                    verification.confidence = new_confidence
+                if new_summary:
+                    verification.summary = new_summary
+                verification.save()
+        
+        # If re-verification is requested, run AI verification
+        if re_verify and dispute.claim:
+            try:
+                # Call AI verification
+                result = call_ai_verify(dispute.claim.text)
+                normalized_result = normalize_ai_response(result)
+                
+                # Update verification result
+                verification = dispute.claim.verification_result
+                if verification:
+                    verification.label = normalized_result.get('label', verification.label)
+                    verification.confidence = normalized_result.get('confidence', verification.confidence)
+                    verification.summary = normalized_result.get('summary', verification.summary)
+                    verification.save()
+                    
+            except Exception as e:
+                logger.error(f"[ADMIN_DISPUTE_APPROVE] Error in AI re-verification: {str(e)}", exc_info=True)
+        
+        return {
+            'status': 'success',
+            'message': 'Dispute approved successfully',
+            'action': 'approve'
+        }
+        
+    def _handle_reject(self, dispute, request, review_note):
+        """Handle reject action for a dispute"""
+        logger.info(f"[ADMIN_DISPUTE_REJECT] Rejecting dispute {dispute.id}")
+        
+        # Update dispute status
+        dispute.status = Dispute.STATUS_REJECTED
+        dispute.reviewed_by = request.user
+        dispute.reviewed_at = timezone.now()
+        dispute.review_note = review_note
+        dispute.save()
+        
+        return {
+            'status': 'success',
+            'message': 'Dispute rejected successfully',
+            'action': 'reject'
+        }
+        
+    def _trigger_pipeline(self, dispute):
+        """Trigger any post-approval pipeline actions"""
+        logger.info(f"[ADMIN_DISPUTE_PIPELINE] Triggering pipeline for dispute {dispute.id}")
+        
+        # Send email notification if email service is available
+        try:
+            from .email_service import email_service
+            if hasattr(dispute, 'reporter_email') and dispute.reporter_email:
+                email_service.send_dispute_decision_email(
+                    email=dispute.reporter_email,
+                    dispute_id=dispute.id,
+                    decision='approved' if dispute.status == Dispute.STATUS_APPROVED else 'rejected',
+                    review_note=dispute.review_note
+                )
+        except Exception as e:
+            logger.error(f"[ADMIN_DISPUTE_PIPELINE] Error sending email: {str(e)}", exc_info=True)
+    
     @transaction.atomic
     def post(self, request, dispute_id):
         """
@@ -510,220 +590,220 @@ class AdminDisputeDetailView(APIView):
                 'detail': str(e) if settings.DEBUG else None
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    def _trigger_pipeline(self, dispute):
-        """
-        Trigger the processing pipeline for DOI parsing and verification
-        
-        Flow:
-        1. Ambil evidence dari DOI/URL yang diberikan user
-        2. Tambahkan sebagai source baru
-        3. Jalankan pipeline verifikasi
-        4. Update verification result
-        5. Cari jurnal serupa
-        6. Kirim notifikasi
-        """
-        logger.info(f"[PIPELINE] Memulai pipeline untuk dispute {dispute.id}")
-        
-        try:
-            # 1. Ambil evidence dari DOI/URL yang diberikan user
-            evidence = None
-            if dispute.supporting_doi:
-                logger.info(f"[PIPELINE] Mengambil evidence dari DOI: {dispute.supporting_doi}")
-                evidence = fetch_evidence_from_doi(dispute.supporting_doi)
-            elif dispute.supporting_url:
-                logger.info(f"[PIPELINE] Mengambil evidence dari URL: {dispute.supporting_url}")
-                evidence = fetch_evidence_from_url(dispute.supporting_url)
+        def _trigger_pipeline(self, dispute):
+            """
+            Trigger the processing pipeline for DOI parsing and verification
             
-            # 2. Tambahkan sebagai source baru
-            if evidence and dispute.claim:
-                self._add_user_evidence_as_source(dispute.claim, evidence)
-                logger.info("[PIPELINE] Evidence user berhasil ditambahkan sebagai source")
+            Flow:
+            1. Ambil evidence dari DOI/URL yang diberikan user
+            2. Tambahkan sebagai source baru
+            3. Jalankan pipeline verifikasi
+            4. Update verification result
+            5. Cari jurnal serupa
+            6. Kirim notifikasi
+            """
+            logger.info(f"[PIPELINE] Memulai pipeline untuk dispute {dispute.id}")
             
-            # 3. Jalankan pipeline verifikasi
-            if dispute.claim:
-                logger.info("[PIPELINE] Memulai proses verifikasi...")
-                from .ai_adapter import call_ai_verify
+            try:
+                # 1. Ambil evidence dari DOI/URL yang diberikan user
+                evidence = None
+                if dispute.supporting_doi:
+                    logger.info(f"[PIPELINE] Mengambil evidence dari DOI: {dispute.supporting_doi}")
+                    evidence = fetch_evidence_from_doi(dispute.supporting_doi)
+                elif dispute.supporting_url:
+                    logger.info(f"[PIPELINE] Mengambil evidence dari URL: {dispute.supporting_url}")
+                    evidence = fetch_evidence_from_url(dispute.supporting_url)
                 
-                # Panggil AI untuk memverifikasi ulang dengan evidence tambahan
-                ai_result = call_ai_verify(
-                    claim_text=dispute.claim.text,
-                    additional_evidence=evidence
-                )
+                # 2. Tambahkan sebagai source baru
+                if evidence and dispute.claim:
+                    self._add_user_evidence_as_source(dispute.claim, evidence)
+                    logger.info("[PIPELINE] Evidence user berhasil ditambahkan sebagai source")
                 
-                # 4. Update verification result
-                if ai_result and 'label' in ai_result:
+                # 3. Jalankan pipeline verifikasi
+                if dispute.claim:
+                    logger.info("[PIPELINE] Memulai proses verifikasi...")
+                    from .ai_adapter import call_ai_verify
+                    
+                    # Panggil AI untuk memverifikasi ulang dengan evidence tambahan
+                    ai_result = call_ai_verify(
+                        claim_text=dispute.claim.text,
+                        additional_evidence=evidence
+                    )
+                    
+                    # 4. Update verification result
+                    if ai_result and 'label' in ai_result:
+                        verification, _ = VerificationResult.objects.get_or_create(
+                            claim=dispute.claim
+                        )
+                        verification.label = ai_result['label']
+                        verification.confidence = ai_result.get('confidence')
+                        verification.summary = ai_result.get('summary', '')
+                        verification.reviewer_notes = f"Diperbarui oleh sistem setelah verifikasi ulang untuk dispute #{dispute.id}"
+                        verification.save()
+                        
+                        logger.info(f"[PIPELINE] Verifikasi selesai. Hasil: {ai_result['label']} (confidence: {ai_result.get('confidence')})")
+                        
+                        # 5. Cari jurnal serupa untuk referensi tambahan
+                        self._fetch_similar_journals(dispute.claim)
+                        
+                        # 6. Kirim notifikasi ke admin
+                        try:
+                            from .email_service import email_service
+                            email_service.notify_admin_dispute_processed(dispute)
+                            logger.info("[EMAIL] Notifikasi verifikasi ulang terkirim ke admin")
+                        except Exception as e:
+                            logger.error(f"[EMAIL] Gagal mengirim notifikasi ke admin: {str(e)}", exc=True)
+                        
+                        return True
+                    
+            except Exception as e:
+                logger.error(f"[PIPELINE] Error saat memproses pipeline: {str(e)}", exc_info=True)
+                
+                # Kirim notifikasi error ke admin
+                try:
+                    from .email_service import email_service
+                    email_service.notify_admin_system_error(
+                        error_type="Pipeline Error",
+                        error_message=f"Gagal memproses pipeline untuk dispute #{dispute.id}",
+                        context={"error": str(e), "dispute_id": dispute.id}
+                    )
+                except Exception as email_err:
+                    logger.error(f"[EMAIL] Gagal mengirim notifikasi error: {str(email_err)}")
+            
+            logger.info(f"[PIPELINE] Proses pipeline selesai untuk dispute {dispute.id}")
+            return False
+
+        def _fetch_similar_journals(self, claim, max_retries=3, initial_delay=1):
+            """Fetch similar journals with rate limiting and retries."""
+            logger.info(f"[JOURNAL_FETCH] Starting journal search for claim {claim.id}")
+            
+            def make_request(attempt):
+                try:
+                    sch = SemanticScholar(timeout=10)
+                    search_query = claim.text[:200]
+                    logger.info(f"[JOURNAL_FETCH] Attempt {attempt + 1}: Searching for: {search_query[:50]}...")
+                    return sch.search_paper(search_query, limit=2)  # Reduced to 2 results
+                except Exception as e:
+                    if "429" in str(e) and attempt < max_retries - 1:
+                        wait_time = initial_delay * (2 ** attempt)  # Exponential backoff
+                        logger.warning(f"[JOURNAL_FETCH] Rate limited. Waiting {wait_time}s before retry...")
+                        time.sleep(wait_time)
+                        return None
+                    raise
+
+            try:
+                if not claim.text or len(claim.text.strip()) < 3:
+                    logger.warning("[JOURNAL_FETCH] Claim text too short")
+                    return False
+
+                # Try with retries
+                results = None
+                for attempt in range(max_retries):
+                    try:
+                        results = make_request(attempt)
+                        if results is not None:
+                            break
+                    except Exception as e:
+                        if attempt == max_retries - 1:
+                            raise
+
+                if not results:
+                    logger.warning("[JOURNAL_FETCH] No results after retries")
+                    return False
+
+                similar_journals = []
+                for paper in results:
+                    try:
+                        if getattr(paper, 'url', None):
+                            journal = {
+                                'title': getattr(paper, 'title', 'No title'),
+                                'doi': getattr(paper, 'doi', ''),
+                                'url': paper.url,
+                                'abstract': getattr(paper, 'abstract', '')[:300],  # Limit abstract length
+                                'relevance_score': 0.8,
+                                'source_type': 'journal'
+                            }
+                            similar_journals.append(journal)
+                            logger.info(f"[JOURNAL_FETCH] Found: {journal['title'][:50]}...")
+                    except Exception as e:
+                        logger.warning(f"[JOURNAL_FETCH] Error processing paper: {str(e)[:100]}")
+
+                return bool(similar_journals and self._update_claim_sources(claim, similar_journals))
+
+            except Exception as e:
+                logger.error(f"[JOURNAL_FETCH] Failed after {max_retries} attempts: {str(e)}")
+                return False
+
+        def _trigger_pipeline(self, dispute):
+            """Process the claim verification pipeline with better error handling."""
+            logger.info(f"[PIPELINE] Starting pipeline for dispute {dispute.id}")
+            
+            if not dispute.claim:
+                logger.warning("[PIPELINE] No claim associated")
+                return False
+
+            try:
+                # 1. Get evidence (with timeout)
+                evidence = None
+                try:
+                    if dispute.supporting_doi:
+                        evidence = fetch_evidence_from_doi(dispute.supporting_doi)
+                    elif dispute.supporting_url:
+                        evidence = fetch_evidence_from_url(dispute.supporting_url)
+                except Exception as e:
+                    logger.error(f"[PIPELINE] Error fetching evidence: {str(e)}")
+                    evidence = None
+
+                # 2. Add evidence as source if available
+                if evidence:
+                    try:
+                        self._add_user_evidence_as_source(dispute.claim, evidence)
+                        logger.info("[PIPELINE] Added evidence as source")
+                    except Exception as e:
+                        logger.error(f"[PIPELINE] Error adding evidence: {str(e)}")
+
+                # 3. Run verification
+                logger.info("[PIPELINE] Starting verification...")
+                try:
+                    from .ai_adapter import call_ai_verify
+                    ai_result = call_ai_verify(
+                        claim_text=dispute.claim.text,
+                        additional_evidence=evidence
+                    )
+
+                    if not ai_result or 'label' not in ai_result:
+                        logger.error("[PIPELINE] Invalid AI verification result")
+                        return False
+
+                    # Update verification result
                     verification, _ = VerificationResult.objects.get_or_create(
                         claim=dispute.claim
                     )
                     verification.label = ai_result['label']
-                    verification.confidence = ai_result.get('confidence')
-                    verification.summary = ai_result.get('summary', '')
-                    verification.reviewer_notes = f"Diperbarui oleh sistem setelah verifikasi ulang untuk dispute #{dispute.id}"
+                    verification.confidence = ai_result.get('confidence', 0)
+                    verification.summary = ai_result.get('summary', '')[:1000]  # Limit length
+                    verification.reviewer_notes = f"Updated by system after dispute #{dispute.id}"
                     verification.save()
-                    
-                    logger.info(f"[PIPELINE] Verifikasi selesai. Hasil: {ai_result['label']} (confidence: {ai_result.get('confidence')})")
-                    
-                    # 5. Cari jurnal serupa untuk referensi tambahan
-                    self._fetch_similar_journals(dispute.claim)
-                    
-                    # 6. Kirim notifikasi ke admin
-                    try:
-                        from .email_service import email_service
-                        email_service.notify_admin_dispute_processed(dispute)
-                        logger.info("[EMAIL] Notifikasi verifikasi ulang terkirim ke admin")
-                    except Exception as e:
-                        logger.error(f"[EMAIL] Gagal mengirim notifikasi ke admin: {str(e)}", exc=True)
-                    
+
+                    # 4. Fetch similar journals in background
+                    import threading
+                    threading.Thread(
+                        target=self._fetch_similar_journals,
+                        args=(dispute.claim,),
+                        daemon=True
+                    ).start()
+
+                    logger.info("[PIPELINE] Verification complete")
                     return True
-                
-        except Exception as e:
-            logger.error(f"[PIPELINE] Error saat memproses pipeline: {str(e)}", exc_info=True)
-            
-            # Kirim notifikasi error ke admin
-            try:
-                from .email_service import email_service
-                email_service.notify_admin_system_error(
-                    error_type="Pipeline Error",
-                    error_message=f"Gagal memproses pipeline untuk dispute #{dispute.id}",
-                    context={"error": str(e), "dispute_id": dispute.id}
-                )
-            except Exception as email_err:
-                logger.error(f"[EMAIL] Gagal mengirim notifikasi error: {str(email_err)}")
-        
-        logger.info(f"[PIPELINE] Proses pipeline selesai untuk dispute {dispute.id}")
-        return False
 
-    def _fetch_similar_journals(self, claim, max_retries=3, initial_delay=1):
-        """Fetch similar journals with rate limiting and retries."""
-        logger.info(f"[JOURNAL_FETCH] Starting journal search for claim {claim.id}")
-        
-        def make_request(attempt):
-            try:
-                sch = SemanticScholar(timeout=10)
-                search_query = claim.text[:200]
-                logger.info(f"[JOURNAL_FETCH] Attempt {attempt + 1}: Searching for: {search_query[:50]}...")
-                return sch.search_paper(search_query, limit=2)  # Reduced to 2 results
-            except Exception as e:
-                if "429" in str(e) and attempt < max_retries - 1:
-                    wait_time = initial_delay * (2 ** attempt)  # Exponential backoff
-                    logger.warning(f"[JOURNAL_FETCH] Rate limited. Waiting {wait_time}s before retry...")
-                    time.sleep(wait_time)
-                    return None
-                raise
-
-        try:
-            if not claim.text or len(claim.text.strip()) < 3:
-                logger.warning("[JOURNAL_FETCH] Claim text too short")
-                return False
-
-            # Try with retries
-            results = None
-            for attempt in range(max_retries):
-                try:
-                    results = make_request(attempt)
-                    if results is not None:
-                        break
                 except Exception as e:
-                    if attempt == max_retries - 1:
-                        raise
-
-            if not results:
-                logger.warning("[JOURNAL_FETCH] No results after retries")
-                return False
-
-            similar_journals = []
-            for paper in results:
-                try:
-                    if getattr(paper, 'url', None):
-                        journal = {
-                            'title': getattr(paper, 'title', 'No title'),
-                            'doi': getattr(paper, 'doi', ''),
-                            'url': paper.url,
-                            'abstract': getattr(paper, 'abstract', '')[:300],  # Limit abstract length
-                            'relevance_score': 0.8,
-                            'source_type': 'journal'
-                        }
-                        similar_journals.append(journal)
-                        logger.info(f"[JOURNAL_FETCH] Found: {journal['title'][:50]}...")
-                except Exception as e:
-                    logger.warning(f"[JOURNAL_FETCH] Error processing paper: {str(e)[:100]}")
-
-            return bool(similar_journals and self._update_claim_sources(claim, similar_journals))
-
-        except Exception as e:
-            logger.error(f"[JOURNAL_FETCH] Failed after {max_retries} attempts: {str(e)}")
-            return False
-
-    def _trigger_pipeline(self, dispute):
-        """Process the claim verification pipeline with better error handling."""
-        logger.info(f"[PIPELINE] Starting pipeline for dispute {dispute.id}")
-        
-        if not dispute.claim:
-            logger.warning("[PIPELINE] No claim associated")
-            return False
-
-        try:
-            # 1. Get evidence (with timeout)
-            evidence = None
-            try:
-                if dispute.supporting_doi:
-                    evidence = fetch_evidence_from_doi(dispute.supporting_doi)
-                elif dispute.supporting_url:
-                    evidence = fetch_evidence_from_url(dispute.supporting_url)
-            except Exception as e:
-                logger.error(f"[PIPELINE] Error fetching evidence: {str(e)}")
-                evidence = None
-
-            # 2. Add evidence as source if available
-            if evidence:
-                try:
-                    self._add_user_evidence_as_source(dispute.claim, evidence)
-                    logger.info("[PIPELINE] Added evidence as source")
-                except Exception as e:
-                    logger.error(f"[PIPELINE] Error adding evidence: {str(e)}")
-
-            # 3. Run verification
-            logger.info("[PIPELINE] Starting verification...")
-            try:
-                from .ai_adapter import call_ai_verify
-                ai_result = call_ai_verify(
-                    claim_text=dispute.claim.text,
-                    additional_evidence=evidence
-                )
-
-                if not ai_result or 'label' not in ai_result:
-                    logger.error("[PIPELINE] Invalid AI verification result")
+                    logger.error(f"[PIPELINE] Verification failed: {str(e)}", exc_info=True)
                     return False
 
-                # Update verification result
-                verification, _ = VerificationResult.objects.get_or_create(
-                    claim=dispute.claim
-                )
-                verification.label = ai_result['label']
-                verification.confidence = ai_result.get('confidence', 0)
-                verification.summary = ai_result.get('summary', '')[:1000]  # Limit length
-                verification.reviewer_notes = f"Updated by system after dispute #{dispute.id}"
-                verification.save()
-
-                # 4. Fetch similar journals in background
-                import threading
-                threading.Thread(
-                    target=self._fetch_similar_journals,
-                    args=(dispute.claim,),
-                    daemon=True
-                ).start()
-
-                logger.info("[PIPELINE] Verification complete")
-                return True
-
             except Exception as e:
-                logger.error(f"[PIPELINE] Verification failed: {str(e)}", exc_info=True)
+                logger.error(f"[PIPELINE] Pipeline failed: {str(e)}", exc_info=True)
                 return False
-
-        except Exception as e:
-            logger.error(f"[PIPELINE] Pipeline failed: {str(e)}", exc_info=True)
-            return False
-            
+                
         def _handle_approve(self, dispute: Dispute, request, review_note: str,
                         manual_update: bool = False, re_verify: bool = True,
                         new_label: str = None, new_confidence: float = None,

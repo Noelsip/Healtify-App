@@ -1,6 +1,7 @@
-import { AlertCircle, ArrowLeft, Bot, Calendar, CheckCircle2, Clock, FileText, Filter as FilterIcon, Info, Loader2, LogOut, Scale, Search, User, X, XCircle } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Bot, Calendar, CheckCircle2, Clock, FileText, Filter as FilterIcon, Info, LogOut, Scale, Search, User, X, XCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { ToastContainer, toast } from 'react-toastify';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://api.healthify.cloud/api' ;
 
@@ -44,15 +45,14 @@ const AdminDisputes = () => {
             }
 
             if (!response.ok) {
-                throw new Error('Failed to fetch disputes');
+            throw new Error('Gagal memuat daftar dispute');
             }
-
             const data = await response.json();
             setDisputes(data.disputes || []);
-            setLoading(false);
         } catch (err) {
             console.error('Error fetching disputes:', err);
-            setError('Failed to load disputes');
+            notify.error('Gagal memuat daftar dispute');
+        } finally {
             setLoading(false);
         }
     };
@@ -67,14 +67,15 @@ const AdminDisputes = () => {
                 }
             });
 
-            if (!response.ok) throw new Error('Failed to fetch dispute details');
-
+            if (!response.ok) {
+            throw new Error('Gagal memuat detail dispute');
+            }
             const data = await response.json();
             setSelectedDispute(data);
-            setShowModal(true);
+        setShowModal(true);
         } catch (err) {
             console.error('Error fetching dispute details:', err);
-            alert('Failed to load dispute details');
+            notify.error('Gagal memuat detail dispute');
         }
     };
 
@@ -122,32 +123,19 @@ const AdminDisputes = () => {
 
             if (!response.ok) {
                 const errorData = await response.json();
-                throw new Error(errorData.error || 'Failed to process dispute action');
+                throw new Error(errorData.error || 'Gagal memproses tindakan dispute');
             }
 
             const data = await response.json();
             
-            // Show detailed message
-            let message = data.message || `Dispute ${action}ed successfully`;
-            
-            if (data.verification_update) {
-                message += `\nVerification Updated:\n` +
-                    `Label: ${data.verification_update.label}\n` +
-                    `Confidence: ${(data.verification_update.confidence * 100).toFixed(1)}%`;
-            }
-            
-            if (data.updated_via) {
-                message += `\n\nUpdated Via: ${data.updated_via.replace(/_/g, ' ')}`;
-            }
-            
-            alert(message);
-            
-            setShowModal(false);
-            setSelectedDispute(null);
-            fetchDisputes(token);
+            notify.success(data.message || `Berhasil ${action === 'approve' ? 'menyetujui' : 'menolak'} dispute`);
+        
+        setShowModal(false);
+        setSelectedDispute(null);
+        fetchDisputes(token);
         } catch (err) {
             console.error('Error processing dispute action:', err);
-            alert(`Failed to process action: ${err.message}`);
+            notify.error(`Gagal memproses tindakan dispute: ${err.message}`);
         } finally {
             setActionLoading(false);
         }
@@ -167,6 +155,36 @@ const AdminDisputes = () => {
         return colors[status] || 'bg-gray-100 text-gray-800';
     };
 
+    const notify = {
+        success: (message) => toast.success(message, {
+            position: "top-right",
+            autoClose: 5000,
+            hideProgressBar: false,
+            closeOnClick: true,
+            pauseOnHover: true,
+            draggable: true,
+            progress: undefined,
+        }),
+        error: (message) => toast.error(message, {
+            position: "top-right",
+            autoClose: 5000,
+            hideProgressBar: false,
+            closeOnClick: true,
+            pauseOnHover: true,
+            draggable: true,
+            progress: undefined,
+        }),
+        info: (message) => toast.info(message, {
+            position: "top-right",
+            autoClose: 5000,
+            hideProgressBar: false,
+            closeOnClick: true,
+            pauseOnHover: true,
+            draggable: true,
+            progress: undefined,
+        })
+    };
+
     if (loading) {
         return (
             <div className="flex items-center justify-center min-h-screen">
@@ -180,30 +198,43 @@ const AdminDisputes = () => {
 
     return (
         <div className="min-h-screen bg-gray-50">
+            <ToastContainer
+            position="top-right"
+            autoClose={5000}
+            hideProgressBar={false}
+            newestOnTop={false}
+            closeOnClick
+            rtl={false}
+            pauseOnFocusLoss
+            draggable
+            pauseOnHover
+        />
             {/* Header */}
             <header className="bg-gradient-to-r from-blue-600 to-cyan-600 shadow-lg">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-                    <div className="flex justify-between items-center">
-                        <div>
-                            <div className="flex items-center gap-3 mb-2">
-                                <Scale className="w-8 h-8 text-white" />
-                                <h1 className="text-2xl sm:text-3xl font-bold text-white">Disputes Management</h1>
+                <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-6 py-4 sm:py-6">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                        <div className="w-full sm:w-auto">
+                            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+                                <div className="flex items-center gap-2">
+                                    <Scale className="w-6 h-6 sm:w-8 sm:h-8 text-white" />
+                                    <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-white">Disputes Management</h1>
+                                </div>
+                                <p className="text-xs sm:text-sm text-blue-100 pl-8 sm:pl-0">Review and resolve user disputes</p>
                             </div>
-                            <p className="text-sm text-blue-100">Review and resolve user disputes</p>
                         </div>
-                        <div className="flex gap-3">
+                        <div className="w-full sm:w-auto flex flex-col sm:flex-row gap-2 sm:gap-3">
                             <button
                                 onClick={() => navigate('/admin/dashboard')}
-                                className="inline-flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg transition backdrop-blur-sm border border-white/20"
+                                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-3 sm:px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg transition backdrop-blur-sm border border-white/20 text-sm sm:text-base"
                             >
-                                <ArrowLeft className="w-4 h-4" />
+                                <ArrowLeft className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                                 Dashboard
                             </button>
                             <button
                                 onClick={handleLogout}
-                                className="inline-flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg transition backdrop-blur-sm border border-white/20"
+                                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-3 sm:px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg transition backdrop-blur-sm border border-white/20 text-sm sm:text-base"
                             >
-                                <LogOut className="w-4 h-4" />
+                                <LogOut className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                                 Logout
                             </button>
                         </div>
@@ -298,6 +329,32 @@ const AdminDisputes = () => {
                                             {/* Claim Text */}
                                             <div>
                                                 <div className="flex items-center gap-2 mb-2">
+                                                    {dispute.supporting_doi && (
+                                                        <div className="mt-2">
+                                                            <a 
+                                                                href={`https://doi.org/${dispute.supporting_doi}`} 
+                                                                target="_blank" 
+                                                                rel="noopener noreferrer"
+                                                                className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 hover:underline"
+                                                            >
+                                                                <FileText className="w-4 h-4" />
+                                                                Lihat Referensi DOI
+                                                            </a>
+                                                        </div>
+                                                    )}
+                                                    {dispute.supporting_url && !dispute.supporting_doi && (
+                                                        <div className="mt-2">
+                                                            <a 
+                                                                href={dispute.supporting_url} 
+                                                                target="_blank" 
+                                                                rel="noopener noreferrer"
+                                                                className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 hover:underline"
+                                                            >
+                                                                <FileText className="w-4 h-4" />
+                                                                Lihat Referensi
+                                                            </a>
+                                                        </div>
+                                                    )}
                                                     <FileText className="w-4 h-4 text-blue-600" />
                                                     <label className="text-xs font-semibold text-gray-700">Claim Text</label>
                                                 </div>
@@ -399,8 +456,8 @@ const DisputeModal = ({ dispute, onClose, onAction, loading }) => {
     };
 
     return (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto border border-slate-200">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 z-50">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto border border-slate-200 mx-2 sm:mx-4 my-4">
                 <div className="p-6 sm:p-8">
                     <div className="flex justify-between items-center mb-6">
                         <div className="flex items-center gap-3">
@@ -431,18 +488,59 @@ const DisputeModal = ({ dispute, onClose, onAction, loading }) => {
                                 </label>
                             </div>
                             <p className="text-gray-900 text-sm leading-relaxed">{dispute.claim_text}</p>
+
+                            {/* Referensi yang Diberikan */}
+                            {(dispute.supporting_doi || dispute.supporting_url) && (
+                                <div className="mt-4 pt-4 border-t border-orange-100">
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <FileText className="w-4 h-4 text-green-600" />
+                                        <label className="block text-sm font-semibold text-gray-700">
+                                            Referensi yang Diberikan
+                                        </label>
+                                    </div>
+                                    <div className="space-y-3">
+                                        {dispute.supporting_doi && (
+                                            <div className="bg-white p-3 rounded-lg border border-green-100">
+                                                <p className="text-xs text-gray-500 mb-1">DOI Referensi:</p>
+                                                <a 
+                                                    href={`https://doi.org/${dispute.supporting_doi}`}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="text-sm text-blue-600 hover:underline break-words"
+                                                >
+                                                    {`https://doi.org/${dispute.supporting_doi}`}
+                                                </a>
+                                            </div>
+                                        )}
+                                        {dispute.supporting_url && (
+                                            <div className="bg-white p-3 rounded-lg border border-green-100">
+                                                <p className="text-xs text-gray-500 mb-1">URL Referensi:</p>
+                                                <a 
+                                                    href={dispute.supporting_url}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="text-sm text-blue-600 hover:underline break-words"
+                                                >
+                                                    {dispute.supporting_url}
+                                                </a>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         <div className="bg-gradient-to-br from-orange-50 to-white border border-orange-100 rounded-xl p-4">
                             <div className="flex items-center gap-2 mb-2">
                                 <AlertCircle className="w-4 h-4 text-orange-600" />
                                 <label className="block text-sm font-semibold text-gray-700">
-                                    Dispute Reason
+                                    Alasan Dispute
                                 </label>
                             </div>
-                            <p className="text-gray-900 text-sm leading-relaxed">
+                            <p className="text-gray-900 text-sm leading-relaxed mb-3">
                                 {dispute.reason}
                             </p>
+                            
                         </div>
 
                         <div className="grid grid-cols-2 gap-4">
@@ -477,10 +575,10 @@ const DisputeModal = ({ dispute, onClose, onAction, loading }) => {
                                         onChange={(e) => setNewLabel(e.target.value)}
                                         className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-medium"
                                     >
-                                        <option value="auto">🤖 Re-Verify with AI (Recommended)</option>
-                                        <option value="TRUE">✅ Set as VALID (Klaim Benar)</option>
-                                        <option value="FALSE">❌ Set as HOAX (Klaim Salah)</option>
-                                        <option value="MIXTURE">⚠️ Set as UNCERTAIN (Sebagian Benar)</option>
+                                        <option value="auto">Re-Verify with AI (Recommended)</option>
+                                        <option value="TRUE">Set as VALID (Klaim Benar)</option>
+                                        <option value="FALSE">Set as HOAX (Klaim Salah)</option>
+                                        <option value="MIXTURE">Set as UNCERTAIN (Sebagian Benar)</option>
                                     </select>
                                     <div className="mt-3 p-3 bg-blue-50 rounded-lg">
                                         <p className="text-xs text-blue-800 flex items-start gap-2">
@@ -532,7 +630,8 @@ const DisputeModal = ({ dispute, onClose, onAction, loading }) => {
                                     />
                                 </div>
 
-                                <div className="bg-gradient-to-br from-blue-50 to-cyan-50 border border-blue-200 rounded-xl p-4">
+
+                                <div className="bg-gradient-to-br from-orange-50 to-white border border-orange-100 rounded-xl p-4">
                                     <div className="flex items-start gap-2 mb-3">
                                         <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
                                         <p className="text-sm font-semibold text-blue-900">
@@ -563,48 +662,34 @@ const DisputeModal = ({ dispute, onClose, onAction, loading }) => {
                                     </ul>
                                 </div>
 
-                                <div className="flex flex-col sm:flex-row gap-3 pt-2">
-                                    <button
-                                        onClick={handleApprove}
-                                        disabled={loading || !adminNotes.trim()}
-                                        className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition shadow-lg"
-                                    >
-                                        {loading ? (
-                                            <>
-                                                <Loader2 className="w-5 h-5 animate-spin" />
-                                                Processing...
-                                            </>
-                                        ) : (
-                                            <>
-                                                <CheckCircle2 className="w-5 h-5" />
-                                                Approve & Update
-                                            </>
-                                        )}
-                                    </button>
-                                    <button
-                                        onClick={handleReject}
-                                        disabled={loading || !adminNotes.trim()}
-                                        className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition shadow-lg"
-                                    >
-                                        {loading ? (
-                                            <>
-                                                <Loader2 className="w-5 h-5 animate-spin" />
-                                                Processing...
-                                            </>
-                                        ) : (
-                                            <>
-                                                <XCircle className="w-5 h-5" />
-                                                Reject
-                                            </>
-                                        )}
-                                    </button>
-                                    <button
-                                        onClick={onClose}
-                                        disabled={loading}
-                                        className="px-4 py-3 bg-gray-200 hover:bg-gray-300 text-gray-900 font-semibold rounded-lg transition"
-                                    >
-                                        Close
-                                    </button>
+                                <div className="mt-6 flex flex-col sm:flex-row gap-3">
+                                    <div className="flex-1 sm:order-2">
+                                        <button
+                                            onClick={handleApprove}
+                                            disabled={loading}
+                                            className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                                        >
+                                            {loading ? 'Memproses...' : 'Setujui'}
+                                        </button>
+                                    </div>
+                                    <div className="flex-1 sm:order-3">
+                                        <button
+                                            onClick={handleReject}
+                                            disabled={loading}
+                                            className="w-full px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 disabled:opacity-50"
+                                        >
+                                            {loading ? 'Memproses...' : 'Tolak'}
+                                        </button>
+                                    </div>
+                                    <div className="sm:order-1 sm:flex-1">
+                                        <button
+                                            onClick={onClose}
+                                            disabled={loading}
+                                            className="w-full px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                                        >
+                                            Batal
+                                        </button>
+                                    </div>
                                 </div>
                             </>
                         )}

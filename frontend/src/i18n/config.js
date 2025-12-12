@@ -376,7 +376,7 @@ const resources = {
         namePlaceholder: "Nama Anda",
         email: "Email",
         emailPlaceholder: "email@example.com",
-        supportingEvidence: "Bukti Pendukung",
+        supportingEvidence: "Bukti Pendukung", 
         evidenceTypes: {
           doi: "Link DOI",
           pdf: "Upload File PDF"

@@ -1,7 +1,7 @@
-import React, { useState } from "react";
-import { AlertCircle, CheckCircle, Upload, Loader2 } from 'lucide-react';
-import { createDispute } from '../services/api';
+import { AlertCircle, CheckCircle, Loader2, Upload } from 'lucide-react';
+import { useState } from "react";
 import { useTranslation } from 'react-i18next';
+import { createDispute } from '../services/api';
 
 const Report = () => {
     const { t } = useTranslation();
@@ -37,13 +37,13 @@ const Report = () => {
         if (file) {
             // Validasi file PDF
             if (file.type !== 'application/pdf') {
-                setErrorMessage(t('report.errors.invalidFormat'));
+                setErrorMessage(t('report.validation.invalidFormat'));
                 e.target.value = null;
                 return;
             }
             // Validasi ukuran file (max 20MB)
             if (file.size > 20 * 1024 * 1024) {
-                setErrorMessage(t('report.errors.fileTooLarge'));
+                setErrorMessage(t('report.validation.fileTooLarge'));
                 e.target.value = null;
                 return;
             }
@@ -76,19 +76,19 @@ const Report = () => {
     // Validasi form
     const validateForm = () => {
         if (!formData.claim_text.trim()) {
-            setErrorMessage('Klaim harus diisi');
+            setErrorMessage(t('report.validation.claimRequired'));
             return false;
         }
         if (!formData.reason.trim()) {
-            setErrorMessage('Alasan harus diisi');
+            setErrorMessage(t('report.validation.reasonRequired'));
             return false;
         }
         if (buktiType === 'doi_link' && !formData.supporting_doi.trim()) {
-            setErrorMessage('Link DOI harus diisi');
+            setErrorMessage(t('report.validation.doiRequired'));
             return false;
         }
         if (buktiType === 'upload_pdf' && !formData.supporting_file) {
-            setErrorMessage('File PDF harus diunggah');
+            setErrorMessage(t('report.validation.fileRequired'));
             return false;
         }
         return true;

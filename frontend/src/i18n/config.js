@@ -4,6 +4,15 @@ import { initReactI18next } from 'react-i18next';
 const resources = {
   en: {
     translation: {
+      common: {
+        error: "Error",
+        success: "Success",
+        loading: "Loading...",
+        submit: "Submit",
+        cancel: "Cancel",
+        close: "Close",
+        save: "Save"
+      },
       nav: {
         home: "Home",
         about: "About",
@@ -138,6 +147,14 @@ const resources = {
           invalidFormat: "File must be in PDF format",
           fileTooLarge: "File size exceeds maximum (20MB)",
           submitFailed: "Failed to submit report. Please try again."
+        },
+        validation: {
+          invalidFormat: "Invalid file format. Only PDF files are allowed.",
+          fileTooLarge: "File size too large. Maximum 20MB.",
+          claimRequired: "Claim is required",
+          reasonRequired: "Reason is required",
+          doiRequired: "DOI link is required",
+          fileRequired: "PDF file must be uploaded"
         }
       },
       sources: {
@@ -272,6 +289,15 @@ const resources = {
   },
   id: {
     translation: {
+      common: {
+        error: "Error",
+        success: "Berhasil",
+        loading: "Memuat...",
+        submit: "Kirim",
+        cancel: "Batal",
+        close: "Tutup",
+        save: "Simpan"
+      },
       nav: {
         home: "Beranda",
         about: "Tentang",
@@ -403,6 +429,14 @@ const resources = {
           invalidFormat: "File harus berformat PDF",
           fileTooLarge: "Ukuran file melebihi maksimal (20MB)",
           submitFailed: "Gagal mengirim laporan. Silakan coba lagi."
+        },
+        validation: {
+          invalidFormat: "Format file tidak valid. Hanya file PDF yang diperbolehkan.",
+          fileTooLarge: "Ukuran file terlalu besar. Maksimal 20MB.",
+          claimRequired: "Klaim harus diisi",
+          reasonRequired: "Alasan harus diisi",
+          doiRequired: "Link DOI harus diisi",
+          fileRequired: "File PDF harus diunggah"
         }
       },
       sources: {

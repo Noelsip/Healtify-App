@@ -2,7 +2,7 @@ import { AlertCircle, ArrowLeft, Bot, Calendar, CheckCircle2, Clock, FileText, F
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://api.healthify.cloud/api';
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://api.healthify.cloud/api' ;
 
 const AdminDisputes = () => {
     const navigate = useNavigate();
@@ -131,7 +131,7 @@ const AdminDisputes = () => {
             let message = data.message || `Dispute ${action}ed successfully`;
             
             if (data.verification_update) {
-                message += `\n\Verification Updated:\n` +
+                message += `\nVerification Updated:\n` +
                     `Label: ${data.verification_update.label}\n` +
                     `Confidence: ${(data.verification_update.confidence * 100).toFixed(1)}%`;
             }

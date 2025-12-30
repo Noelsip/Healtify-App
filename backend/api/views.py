@@ -195,14 +195,14 @@ def find_similar_claims(claim_text: str, threshold: float = 0.85) -> list:
     similar_claims = []
     
     for claim in recent_claims:
-        if not claim.normalized_text:
+        if not claim.text_normalized:
             continue
             
         # Calculate similarity ratio
         similarity = SequenceMatcher(
             None, 
             normalized, 
-            claim.normalized_text
+            claim.text_normalized
         ).ratio()
         
         if similarity >= threshold:
@@ -743,7 +743,7 @@ class ClaimListView(APIView):
         if params['search']:
             claims = claims.filter(
                 Q(text__icontains=params['search']) |
-                Q(normalized_text__icontains=params['search'])
+                Q(text_normalized__icontains=params['search'])
             )
         
         # Apply label filter
@@ -956,7 +956,7 @@ class DisputeCreateView(APIView):
                 supporting_doi=validated_data.get('supporting_doi', ''),
                 supporting_url=validated_data.get('supporting_url', ''),
                 supporting_file=validated_data.get('supporting_file'),
-                original_label=original_label,
+                original_label=original_label or '',
                 original_confidence=original_confidence
             )
             

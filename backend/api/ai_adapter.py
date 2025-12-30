@@ -378,7 +378,12 @@ def parse_json_from_output(output: str) -> Optional[Dict[str, Any]]:
     
     # Strategy 1: Direct JSON parse
     try:
-        return json.loads(output)
+        parsed = json.loads(output)
+        if isinstance(parsed, list):
+            if len(parsed) == 1 and isinstance(parsed[0], dict):
+                return parsed[0]
+            return {"raw_data": parsed}
+        return parsed
     except json.JSONDecodeError:
         pass
     
@@ -389,7 +394,12 @@ def parse_json_from_output(output: str) -> Optional[Dict[str, Any]]:
         
         if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
             json_str = output[start_idx:end_idx + 1]
-            return json.loads(json_str)
+            parsed = json.loads(json_str)
+            if isinstance(parsed, list):
+                if len(parsed) == 1 and isinstance(parsed[0], dict):
+                    return parsed[0]
+                return {"raw_data": parsed}
+            return parsed
     except (json.JSONDecodeError, ValueError):
         pass
     

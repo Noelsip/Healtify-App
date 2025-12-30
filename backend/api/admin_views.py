@@ -1064,9 +1064,11 @@ class AdminDisputeDetailView(APIView):
                 )
             
             logger.info(f"[SOURCES] Added {len(new_sources)} new sources for claim {claim.id}")
+            return True
         
         except Exception as e:
             logger.error(f"[SOURCES] Error updating sources: {str(e)}")
+            return False
 
     def _add_user_evidence_as_source(self, claim: Claim, evidence: Dict[str, Any]):
         """

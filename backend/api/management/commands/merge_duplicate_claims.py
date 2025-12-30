@@ -1,7 +1,7 @@
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from api.models import Claim, VerificationResult
-from api.views import normalize_claim_text, generate_claim_hash
+from api.text_normalization import normalize_claim_text, generate_semantic_hash
 from collections import defaultdict
 
 
@@ -87,18 +87,18 @@ class Command(BaseCommand):
             batch = claims[i:i+batch_size]
             
             for claim in batch:
-                old_normalized = claim.normalized_text
+                old_normalized = claim.text_normalized
                 old_hash = claim.text_hash
                 
                 # Apply new normalization
                 new_normalized = normalize_claim_text(claim.text)
-                new_hash = generate_claim_hash(claim.text)
+                new_hash = generate_semantic_hash(claim.text)
                 
                 if old_normalized != new_normalized or old_hash != new_hash:
                     if execute:
-                        claim.normalized_text = new_normalized
+                        claim.text_normalized = new_normalized
                         claim.text_hash = new_hash
-                        claim.save(update_fields=['normalized_text', 'text_hash'])
+                        claim.save(update_fields=['text_normalized', 'text_hash'])
                     updated += 1
             
             if (i + batch_size) % 500 == 0:

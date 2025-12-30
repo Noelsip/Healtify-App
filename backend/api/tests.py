@@ -84,6 +84,12 @@ class ClaimVerifyViewTests(TestCase):
         self.assertEqual(cs.rank, 1)
         self.assertEqual(cs.source.doi, "10.1000/testdoi")
 
+    def test_verify_handle_ai_exception(self):
+        url = reverse("claim-verify")
+        with patch("api.views.call_ai_verify", side_effect=Exception("boom")):
+            resp = self.client.post(url, data={"text": "Klaim error"}, format="json")
+        self.assertIn(resp.status_code, (400, 500))
+
 
 class ClaimViewsTests(TestCase):
     def setUp(self):
@@ -955,7 +961,13 @@ class ViewsLabelAndCacheTests(TestCase):
 
     def test_translate_text_gemini_short_text_returns_original(self):
         from api.views import translate_text_gemini
+        # < 10 chars → langsung balik
         self.assertEqual(translate_text_gemini("short", "en"), "short")
+        # 10+ chars tanpa client → tetap balik original
+        self.assertEqual(
+            translate_text_gemini("abcdefghij", "en"),
+            "abcdefghij",
+        )
 
     def test_check_cached_result_prefers_verified(self):
         from api.views import check_cached_result
@@ -974,6 +986,65 @@ class ViewsLabelAndCacheTests(TestCase):
         self.assertIsNotNone(cached_claim)
         self.assertEqual(vr.label, VerificationResult.LABEL_VALID)
 
+    def test_verification_result_confidence_percent(self):
+        claim = Claim.objects.create(text="Z")
+        vr = VerificationResult.objects.create(claim=claim, label=VerificationResult.LABEL_UNVERIFIED, summary="", confidence=None)
+        self.assertIsNone(vr.confidence_percent())
+        vr.label = VerificationResult.LABEL_VALID
+        vr.confidence = 0.875
+        vr.save()
+        self.assertEqual(vr.confidence_percent(), 87.5)
+
+    def test_claim_save_sets_normalized_and_hash(self):
+        from api.text_normalization import normalize_claim_text
+        c = Claim.objects.create(text="Kopi  meningkatkan   fokus!!")
+        self.assertEqual(c.text_normalized, normalize_claim_text(c.text))
+        self.assertTrue(c.text_hash)
+
+    def test_check_cached_result_latest_when_unverified_only(self):
+        claim1 = Claim.objects.create(text="Y1")
+        claim1.status = Claim.STATUS_DONE
+        claim1.save()
+        VerificationResult.objects.create(claim=claim1, label=VerificationResult.LABEL_UNVERIFIED, summary="", confidence=None)
+        claim2 = Claim.objects.create(text="Y1")
+        claim2.status = Claim.STATUS_DONE
+        claim2.save()
+        VerificationResult.objects.create(claim=claim2, label=VerificationResult.LABEL_UNVERIFIED, summary="", confidence=None)
+        from api.views import check_cached_result
+        ok, cached_claim, vr = check_cached_result("Y1")
+        self.assertTrue(ok)
+        self.assertIsNotNone(cached_claim)
+        self.assertEqual(vr.label, VerificationResult.LABEL_UNVERIFIED)
+
+    def test_translate_text_gemini_with_client_text(self):
+        from api.views import translate_text_gemini
+        class DummyResp:
+            def __init__(self, text): self.text = text
+        class DummyModels:
+            def generate_content(self, **kwargs): return DummyResp("Translated")
+        class DummyClient:
+            models = DummyModels()
+        with patch("api.views.get_gemini_client", return_value=DummyClient()):
+            out = translate_text_gemini("abcdefghijk", "en")
+        self.assertEqual(out, "Translated")
+
+    def test_translate_text_gemini_with_candidates_parts(self):
+        from api.views import translate_text_gemini
+        class Part:
+            def __init__(self, text): self.text = text
+        class Content:
+            def __init__(self, parts): self.parts = parts
+        class Candidate:
+            def __init__(self, content): self.content = content
+        class DummyResp:
+            def __init__(self): self.candidates = [Candidate(Content([Part("Translated2")]))]
+        class DummyModels:
+            def generate_content(self, **kwargs): return DummyResp()
+        class DummyClient:
+            models = DummyModels()
+        with patch("api.views.get_gemini_client", return_value=DummyClient()):
+            out = translate_text_gemini("abcdefghijklm", "en")
+        self.assertEqual(out, "Translated2")
 
 class AdminJournalImportAndStatsTests(TestCase):
     def setUp(self):
@@ -1020,6 +1091,16 @@ class AdminJournalImportAndStatsTests(TestCase):
         detail_url = reverse("admin-journal-detail", kwargs={"journal_id": 888888})
         resp = self.client.get(detail_url)
         self.assertEqual(resp.status_code, 404)
+
+    def test_admin_journal_list_search_and_source_filter(self):
+        from api.models import JournalArticle
+        list_url = reverse("admin-journal-list")
+        JournalArticle.objects.create(title="Doaj J", abstract="A", source_portal="doaj")
+        JournalArticle.objects.create(title="Other K", abstract="B", source_portal="other")
+        resp = self.client.get(list_url + "?search=Doaj&source=doaj&page=1&per_page=10")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["pagination"]["page"], 1)
 
 
 class AdminJournalEmbedBranchTests(TestCase):
@@ -1076,9 +1157,11 @@ class AdminJournalEmbedBranchTests(TestCase):
         self.assertGreaterEqual(data["embedded_count"], 1)
 
     def test_embed_error_branch_logs_error(self):
+        from api.models import JournalArticle
+        j = JournalArticle.objects.create(title="Jerr", abstract="A", source_portal="other", is_embedded=False)
         url = reverse("admin-journal-embed")
         with patch("api.views.embed_journal_article", side_effect=Exception("x")):
-            resp = self.client.post(url, data={"journal_ids": []}, format="json")
+            resp = self.client.post(url, data={}, format="json")
         self.assertEqual(resp.status_code, 200)
         self.assertIn("embedded_count", resp.json())
 
@@ -1134,12 +1217,98 @@ class AdminJournalImportEdgeTests(TestCase):
             ]
         }
         url = reverse("admin-journal-import")
-        # Patch create to raise error for second item
-        with patch("api.views.JournalArticle.objects.create", side_effect=[JournalArticle.objects.create(title="Jok", abstract="Aok", doi="10.2000/ok", source_portal="other"), Exception("fail")]):
+        # Patch create to raise error when title == 'Jerr'
+        def create_side_effect(*args, **kwargs):
+            if kwargs.get("title") == "Jerr":
+                raise Exception("fail")
+            return JournalArticle.objects.create(*args, **kwargs)
+        with patch("api.views.JournalArticle.objects.create", side_effect=create_side_effect):
             resp = self.client.post(url, data=payload, format="json")
         self.assertIn(resp.status_code, (201, 400))
         self.assertIn("errors", resp.json())
 
+
+class AdminInternalMethodTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.staff = User.objects.create_user(username="staffx", password="p", is_staff=True, is_superuser=False)
+        self.client.force_authenticate(user=self.staff)
+
+    def test_add_user_evidence_as_source_new_and_existing(self):
+        from api.admin_views import AdminDisputeDetailView
+        from api.models import Claim, Source
+        claim = Claim.objects.create(text="Klaim")
+        view = AdminDisputeDetailView()
+
+        # New source via DOI
+        evidence_new = {"doi": "10.3000/new", "title": "New", "abstract": "Abs", "url": "https://doi.org/10.3000/new"}
+        view._add_user_evidence_as_source(claim, evidence_new)
+        self.assertTrue(Source.objects.filter(doi="10.3000/new").exists())
+
+        # Existing source path
+        existing = Source.objects.create(title="Existing", doi="10.3000/exist", url="https://doi.org/10.3000/exist")
+        evidence_exist = {"doi": "10.3000/exist", "title": "Existing", "abstract": "Abs", "url": "https://doi.org/10.3000/exist"}
+        view._add_user_evidence_as_source(claim, evidence_exist)
+        self.assertTrue(claim.sources.filter(id=existing.id).exists())
+
+    def test_update_claim_sources_returns_true_and_sets_rank(self):
+        from api.admin_views import AdminDisputeDetailView
+        from api.models import Claim
+        claim = Claim.objects.create(text="Klaim x")
+        view = AdminDisputeDetailView()
+        new_sources = [
+            {"title": "S1", "url": "https://example.com/s1", "relevance_score": 0.9, "source_type": "journal"},
+            {"title": "S2", "url": "https://example.com/s2", "relevance_score": 0.5, "source_type": "journal"},
+        ]
+        ok = view._update_claim_sources(claim, new_sources)
+        self.assertTrue(ok)
+        links = ClaimSource.objects.filter(claim=claim).order_by('rank')
+        self.assertEqual(links.count(), 2)
+        self.assertEqual(links[0].rank, 0)
+        self.assertEqual(links[1].rank, 1)
+
+    def test_admin_dispute_approve_manual_update_adds_evidence(self):
+        from api.admin_views import AdminDisputeDetailView
+        from api.models import Claim, Dispute, VerificationResult, Source
+        claim = Claim.objects.create(text="Klaim manual")
+        VerificationResult.objects.create(claim=claim, label=VerificationResult.LABEL_UNCERTAIN, summary="s", confidence=0.6)
+        dispute = Dispute.objects.create(
+            claim=claim,
+            claim_text=claim.text,
+            reason="Alasan",
+            reporter_email="user@example.com",
+            supporting_doi="10.4000/manual",
+            status=Dispute.STATUS_PENDING,
+        )
+        view = AdminDisputeDetailView()
+        # Simulasikan request dengan user staff
+        class DummyReq: 
+            user = self.staff
+        result = view._handle_approve(
+            dispute=dispute,
+            request=DummyReq(),
+            review_note="catatan",
+            manual_update=True,
+            re_verify=False,
+            new_label="valid",
+            new_confidence=0.8,
+            new_summary="updated"
+        )
+        self.assertEqual(result["status"], "success")
+        self.assertTrue(Source.objects.filter(doi="10.4000/manual").exists())
+
+
+class DashboardErrorTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.staff = User.objects.create_user(username="staffdash", password="p", is_staff=True, is_superuser=False)
+        self.client.force_authenticate(user=self.staff)
+
+    def test_admin_dashboard_error_path(self):
+        url = reverse("admin-dashboard-stats")
+        with patch("api.admin_views.Claim.objects.count", side_effect=Exception("boom")):
+            resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 500)
 class ClaimListPaginationTests(TestCase):
     def setUp(self):
         self.client = APIClient()
@@ -1153,8 +1322,86 @@ class ClaimListPaginationTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data["pagination"]["page"], 2)
-        self.assertTrue(data["pagination"]["has_previous"])
         self.assertTrue(data["pagination"]["has_next"])
+        self.assertTrue(data["pagination"]["has_previous"])
+
+
+class AdminSourceListViewTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = User.objects.create_user(
+            username="adminsrc",
+            password="pass12345",
+            is_staff=True,
+            is_superuser=True,
+        )
+        self.client.force_authenticate(user=self.admin)
+
+    def test_source_list_search_and_pagination(self):
+        from api.models import Source
+        for i in range(0, 5):
+            Source.objects.create(title=f"Title {i}", url=f"https://example.com/{i}", credibility_score=0.5)
+
+        url = reverse("admin-source-list") + "?search=Title&page=1&per_page=2"
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["pagination"]["page"], 1)
+        self.assertTrue(data["pagination"]["total"] >= 5)
+
+    def test_source_list_error_path(self):
+        url = reverse("admin-source-list")
+        with patch("api.admin_views.Source.objects.all", side_effect=Exception("boom")):
+            resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 500)
+
+    def test_source_detail_get_and_error_paths(self):
+        from api.models import Source
+        src = Source.objects.create(title="S1", url="https://example.com/1", credibility_score=0.5)
+        detail_url = reverse("admin-source-detail", kwargs={"source_id": src.id})
+        resp = self.client.get(detail_url)
+        self.assertEqual(resp.status_code, 200)
+
+        not_found_url = reverse("admin-source-detail", kwargs={"source_id": 999999})
+        resp_nf = self.client.get(not_found_url)
+        self.assertEqual(resp_nf.status_code, 404)
+
+        with patch("api.admin_views.Source.objects.get", side_effect=Exception("x")):
+            resp_err = self.client.get(detail_url)
+        self.assertEqual(resp_err.status_code, 500)
+
+    def test_source_put_validation_and_error(self):
+        from api.models import Source
+        src = Source.objects.create(title="S1", url="https://example.com/1", credibility_score=0.5)
+        detail_url = reverse("admin-source-detail", kwargs={"source_id": src.id})
+
+        resp_bad = self.client.put(detail_url, data={"credibility_score": 2}, format="json")
+        self.assertEqual(resp_bad.status_code, 400)
+
+        Source.objects.create(title="S2", url="https://dup.com", credibility_score=0.5)
+        resp_dup = self.client.put(detail_url, data={"url": "https://dup.com", "credibility_score": 0.5}, format="json")
+        self.assertEqual(resp_dup.status_code, 400)
+
+        with patch("api.admin_views.Source.save", side_effect=Exception("boom")):
+            resp_err = self.client.put(detail_url, data={"credibility_score": 0.7}, format="json")
+        self.assertEqual(resp_err.status_code, 500)
+
+    def test_source_delete_paths(self):
+        from api.models import Source
+        src = Source.objects.create(title="S1", url="https://example.com/1", credibility_score=0.5)
+        detail_url = reverse("admin-source-detail", kwargs={"source_id": src.id})
+        resp = self.client.delete(detail_url)
+        self.assertEqual(resp.status_code, 200)
+
+        not_found_url = reverse("admin-source-detail", kwargs={"source_id": 999999})
+        resp_nf = self.client.delete(not_found_url)
+        self.assertEqual(resp_nf.status_code, 404)
+
+        src2 = Source.objects.create(title="S2", url="https://example.com/2", credibility_score=0.5)
+        detail_url2 = reverse("admin-source-detail", kwargs={"source_id": src2.id})
+        with patch("api.admin_views.Source.delete", side_effect=Exception("boom")):
+            resp_err = self.client.delete(detail_url2)
+        self.assertEqual(resp_err.status_code, 500)
 class AiAdapterUnitTests(TestCase):
     def test_call_ai_verify_direct_optimized(self):
         from api import ai_adapter
@@ -1352,6 +1599,20 @@ class TextNormalizationExtendedTests(TestCase):
         self.assertTrue(preprocess_for_comparison("X y z"))
         self.assertEqual(get_similarity_explanation(0.96), "Sangat mirip (kemungkinan besar duplikat)")
         self.assertEqual(get_similarity_explanation(0.80), "Agak mirip (mungkin topik yang sama)")
+    def test_claim_similarity_matcher_levels(self):
+        from api.text_normalization import ClaimSimilarityMatcher, normalize_claim_text, generate_fuzzy_hash
+        matcher = ClaimSimilarityMatcher()
+        exact_norm = normalize_claim_text("Vitamin C membantu imunitas")
+        existing = [(1, "Vitamin C membantu imunitas", exact_norm)]
+        result_exact = matcher.find_duplicates("Vitamin C membantu imunitas", existing)
+        self.assertEqual(result_exact["match_level"], "exact")
+        fh = generate_fuzzy_hash("A B C")
+        existing2 = [(2, "A   B   C", normalize_claim_text("A   B   C"))]
+        result_high = matcher.find_duplicates("A B C", existing2)
+        self.assertIn(result_high["match_level"], ("high", "exact"))
+        existing3 = [(3, "B C D E", normalize_claim_text("B C D E"))]
+        result_med = matcher.find_duplicates("B C D", existing3)
+        self.assertIn(result_med["match_level"], ("medium", "low", "high"))
 
 
 class AdminPipelineAndJournalsTests(TestCase):
@@ -1398,3 +1659,18 @@ class AdminPipelineAndJournalsTests(TestCase):
             mocked_sem.return_value.search_paper = dummy_search
             ok2 = view._fetch_similar_journals(claim)
         self.assertTrue(ok2)
+
+    def test_fetch_similar_journals_short_text_and_no_results(self):
+        from api.admin_views import AdminDisputeDetailView
+        claim = Claim.objects.create(text="X")
+        view = AdminDisputeDetailView()
+        # text terlalu pendek -> False
+        ok_short = view._fetch_similar_journals(claim)
+        self.assertFalse(ok_short)
+
+        # text cukup panjang tapi SemanticScholar mengembalikan None
+        claim2 = Claim.objects.create(text="Klaim panjang tentang kesehatan dan penelitian cukup untuk test")
+        with patch("api.admin_views.SemanticScholar") as mocked_sem:
+            mocked_sem.return_value.search_paper.return_value = None
+            ok_none = view._fetch_similar_journals(claim2)
+        self.assertFalse(ok_none)

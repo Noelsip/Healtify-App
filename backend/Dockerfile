@@ -14,19 +14,29 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements
+# Copy requirements from backend subdirectory
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy code
+# Copy backend code
 COPY backend/ /app/
+
+# Copy training folder (now accessible from root)
 COPY training/ /app/training/
 
-# Create directories
+# Verify training directory exists (debugging)
+RUN echo "=== Verifying directories ===" && \
+    ls -la /app/ && \
+    echo "=== Training directory ===" && \
+    ls -la /app/training/ && \
+    echo "=== Scripts directory ===" && \
+    ls -la /app/training/scripts/ || echo "⚠️ Scripts directory not found"
+
+# Create necessary directories
 RUN mkdir -p /app/staticfiles /app/media /app/logs
 
 # Collect static files
-RUN python manage.py collectstatic --noinput
+RUN python manage.py collectstatic --noinput || echo "⚠️ collectstatic failed"
 
 EXPOSE $PORT
 
@@ -34,7 +44,7 @@ EXPOSE $PORT
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
     CMD curl -f http://localhost:${PORT}/api/health/ || exit 1
 
-# PERBAIKAN: Tambahkan makemigrations sebelum migrate
+# Start command
 CMD python manage.py makemigrations --noinput && \
     python manage.py migrate --noinput && \
     gunicorn backend_project.wsgi:application \

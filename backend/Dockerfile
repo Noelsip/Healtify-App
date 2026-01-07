@@ -1,6 +1,5 @@
 FROM python:3.11-slim
 
-# Set environment variables
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PORT=8000
@@ -15,32 +14,29 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements (dari current directory karena root = backend/)
-COPY requirements.txt .
+# Copy requirements FROM backend/ (karena root context = project root)
+COPY backend/requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy backend code (current directory)
-COPY . /app/
+# Copy backend code
+COPY backend/ /app/
 
-# Copy training directory (dari parent directory)
-COPY ../training /app/training/
+# Copy training directory (sekarang accessible karena root = project root)
+COPY training/ /app/training/
 
-# Create necessary directories
+# Create directories
 RUN mkdir -p /app/staticfiles /app/media /app/logs
 
-# Collect static files
+# Collect static
 RUN python manage.py collectstatic --noinput || echo "Collectstatic will run at startup"
 
-# Expose port
 EXPOSE 8000
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
     CMD curl -f http://localhost:${PORT}/api/health/ || exit 1
 
-# Start application
 CMD python manage.py migrate --noinput && \
     gunicorn backend_project.wsgi:application \
     --bind 0.0.0.0:${PORT} \

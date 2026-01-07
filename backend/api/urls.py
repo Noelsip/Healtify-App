@@ -35,6 +35,8 @@ from .admin_views import (
 )
 
 urlpatterns = [
+    path('health/', views.health_check, name='health_check'),
+
     # Public Endpoints - Claim
     path('verify/', ClaimVerifyView.as_view(), name='claim-verify'),
     path('translate/', translate_verification_result, name='translate-verification-result'),

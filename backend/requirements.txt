@@ -11,6 +11,7 @@ pgvector
 
 # production server
 gunicorn
+whitenoise
 
 # Utilities
 python-dotenv

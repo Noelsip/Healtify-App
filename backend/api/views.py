@@ -56,6 +56,14 @@ def get_gemini_client():
             return None
     return _gemini_client
 
+@api_view(['GET'])
+def health_check(request):
+    """Health check endpoint for Railway"""
+    return Response({
+        'status': 'healthy',
+        'timestamp': timezone.now().isoformat()
+    }, status=200)
+    
 def normalize_claim_text(text: str) -> str:
     """
     Normalisasi teks klaim untuk konsistensi - IMPROVED VERSION.

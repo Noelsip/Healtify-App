@@ -5,13 +5,15 @@ import os
 from google import genai
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
+import django
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from .permissions import IsAdminOrReadOnly
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from django.db import transaction, models
+from django.db import transaction, models, connection
 from django.db.models import Q
 from django.http import Http404
 from django.conf import settings
@@ -57,10 +59,19 @@ def get_gemini_client():
     return _gemini_client
 
 @api_view(['GET'])
+@permission_classes([AllowAny])
 def health_check(request):
-    """Health check endpoint for Railway"""
+    """Health check endpoint untuk Railway"""
+    try:
+        connection.ensure_connection()
+        db_status = "connected"
+    except Exception as e:
+        db_status = f"error: {str(e)}"
+    
     return Response({
         'status': 'healthy',
+        'django_version': django.get_version(),
+        'database': db_status,
         'timestamp': timezone.now().isoformat()
     }, status=200)
     

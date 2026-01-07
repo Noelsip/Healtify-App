@@ -6,12 +6,13 @@ django-cors-headers
 django-environ
 
 # database library
-psycopg2-binary
+psycopg2-binary==2.9.9
+dj-database-url==2.1.0
 pgvector
 
 # production server
-gunicorn
-whitenoise
+gunicorn==21.2.0
+whitenoise==6.6.0
 
 # Utilities
 python-dotenv

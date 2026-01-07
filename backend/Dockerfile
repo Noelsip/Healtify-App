@@ -1,36 +1,29 @@
 FROM python:3.11-slim
 
-ENV PYTHONDONTWRITEBYTECODE=1 
-ENV PYTHONUNBUFFERED=1
-
 WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
-    build-essential \
     gcc \
-    libpq-dev \
-    curl \
+    postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy backend requirements
-COPY backend/requirements.txt /app/backend/requirements.txt
-COPY training/requirements.txt /app/training/requirements.txt
-
-# Install Python packages
-RUN pip install --no-cache-dir -r /app/backend/requirements.txt \
-    && pip install --no-cache-dir -r /app/training/requirements.txt
+COPY backend/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy backend code
-COPY backend/ /app/backend/
+COPY backend/ .
+
+# Copy training directory (needed for AI adapter)
 COPY training/ /app/training/
 
+# Collect static files
+RUN python manage.py collectstatic --noinput || true
 
-# Set working directory to backend
-WORKDIR /app/backend
+# Expose port
+EXPOSE 8000
 
-# Run migrations and start server
-CMD sh -c "python manage.py makemigrations && \
-            python manage.py migrate && \
-            python manage.py collectstatic --noinput && \
-            gunicorn backend_project.wsgi:application --bind 0.0.0.0:8000 --workers 3"
+# Start command
+CMD sh -c "python manage.py migrate && \
+           gunicorn backend_project.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --timeout 120"

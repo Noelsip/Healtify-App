@@ -46,6 +46,7 @@ ALLOWED_HOSTS = [
     "healthify.cloud",
     "api.healthify.cloud",
     "72.61.209.124",
+    "*.railway.app",
     "localhost",
     "127.0.0.1",
 ]

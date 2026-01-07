@@ -287,6 +287,13 @@ LOGGING = {
     },
 }
 
+DATABASE_URL = os.getenv('DATABASE_URL')
+
+# Ensure pgvector support
+if DATABASE_URL and 'postgresql' in DATABASE_URL:
+    # Tambahkan engine untuk pgvector
+    DATABASES['default']['ENGINE'] = 'django.db.backends.postgresql'
+
 # Create logs directory if it doesn't exist
 LOGS_DIR = BASE_DIR / 'logs'
 LOGS_DIR.mkdir(exist_ok=True)

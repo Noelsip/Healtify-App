@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-# Set environment
+# Set environment variables
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PORT=8000
@@ -15,29 +15,29 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements
+# Copy requirements (dari current directory karena root = backend/)
 COPY requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Copy backend code (current directory)
 COPY . /app/
 
-# Copy training directory (needed for AI adapter)
+# Copy training directory (dari parent directory)
 COPY ../training /app/training/
 
 # Create necessary directories
 RUN mkdir -p /app/staticfiles /app/media /app/logs
 
 # Collect static files
-RUN python manage.py collectstatic --noinput || true
+RUN python manage.py collectstatic --noinput || echo "Collectstatic will run at startup"
 
 # Expose port
 EXPOSE 8000
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
     CMD curl -f http://localhost:${PORT}/api/health/ || exit 1
 
 # Start application

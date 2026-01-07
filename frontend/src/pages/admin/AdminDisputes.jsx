@@ -9,7 +9,6 @@ const AdminDisputes = () => {
     const navigate = useNavigate();
     const [disputes, setDisputes] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState('');
     const [filterStatus, setFilterStatus] = useState('all');
     const [selectedDispute, setSelectedDispute] = useState(null);
     const [showModal, setShowModal] = useState(false);
@@ -244,13 +243,6 @@ const AdminDisputes = () => {
 
             {/* Main Content */}
             <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-                {error && (
-                    <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6 flex items-start gap-2">
-                        <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-                        <span>{error}</span>
-                    </div>
-                )}
-
                 {/* Filter */}
                 <div className="bg-white rounded-2xl shadow-xl border border-slate-100 p-6 mb-6">
                     <div className="flex items-center gap-2 mb-4">

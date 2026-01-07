@@ -37,20 +37,28 @@ NOTIFICATION_FROM_NAME = os.getenv('NOTIFICATION_FROM_NAME', 'Healthify System')
 # For development - use console email backend
 if os.getenv('DEBUG', 'True') == 'True':
     EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+    
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-default-key-change-this-in-production')
+# SECURITY WARNING
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY')
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv('DEBUG', 'True') == 'True'
+if not SECRET_KEY:
+    raise ValueError("The DJANGO_SECRET_KEY environment variable is not set.")
+
+# SECURITY WARNING
+DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
 ALLOWED_HOSTS = [
     "healthify.cloud",
+    "www.healthify.cloud", 
     "api.healthify.cloud",
-    "*.railway.app",
     "localhost",
     "127.0.0.1",
 ]
+
+railway_domain = os.getenv('RAILWAY_STATIC_URL')
+if railway_domain:
+    ALLOWED_HOSTS.append(railway_domain.replace('https://', '').replace('http://', ''))
 
 # Application definition
 INSTALLED_APPS = [
@@ -121,7 +129,7 @@ if _has_postgres_env:
 elif os.getenv('DATABASE_URL'):
     DATABASES = {
         'default': dj_database_url.config(
-            default=f"postgresql://{os.getenv('DB_USER', 'postgres')}:{os.getenv('DB_PASSWORD', '')}@{os.getenv('DB_HOST', 'localhost')}:{os.getenv('DB_PORT', '5432')}/{os.getenv('DB_NAME', 'healtify_db')}",
+            default=os.getenv('DATABASE_URL'),
             conn_max_age=600,
             conn_health_checks=True,
         )
@@ -172,9 +180,11 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 CORS_ALLOWED_ORIGINS = [
     "https://healthify.cloud",
     "https://www.healthify.cloud",
-    "https://api.healthify.cloud",
-    "http://localhost:5173",
 ]
+
+frontend_url = os.getenv('FRONTEND_URL')
+if frontend_url:
+    CORS_ALLOWED_ORIGINS.append(frontend_url)
 
 # mode dev bukan mode prod
 CORS_ALLOW_CREDENTIALS = False

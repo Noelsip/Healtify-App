@@ -12,9 +12,7 @@ from typing import Dict, Any, Optional, List
 
 logger = logging.getLogger(__name__)
 
-# ===========================
 # Path Configuration
-# ===========================
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 PROJECT_ROOT = BACKEND_DIR.parent
 TRAINING_DIR = PROJECT_ROOT / "training"
@@ -24,11 +22,14 @@ VERIFY_SCRIPT = TRAINING_SCRIPTS_DIR / "prompt_and_verify_optimized.py"
 
 if not VERIFY_SCRIPT.exists():
     logger.warning(f"Optimized script not found, using original")
-    VERIFY_SCRIPT = TRAINING_SCRIPTS_DIR / "prompt_and_verify.py"
+    VERIFY_SCRIPT = Path("/app/training/scripts/prompt_and_verify_optimized.py")
 
-# ===========================
+if not VERIFY_SCRIPT.exists():
+    logger.warning(f"Optimized script not found at {VERIFY_SCRIPT}")
+    logger.warning("Will use direct AI call method")
+
+
 # Configuration
-# ===========================
 VERIFICATION_TIMEOUT = 90  
 MAX_RETRIES = 2
 SIMPLE_CLAIM_WORD_THRESHOLD = 20
@@ -69,9 +70,7 @@ def validate_url(url: str, timeout: float = 3.0) -> str:
         logger.debug(f"validate_url HEAD failed for {url}: {e}")
         return url
 
-# ===========================
 # Helper Functions
-# ===========================
 
 def normalize_claim_text(text: str) -> str:
     """Normalisasi teks klaim untuk konsistensi."""
@@ -420,9 +419,7 @@ def parse_json_from_output(output: str) -> Optional[Dict[str, Any]]:
     logger.warning("Failed to parse JSON from output")
     return None
 
-# ===========================
 # Direct Import Methods (FASTEST)
-# ===========================
 
 def get_optimized_module():
     """Lazy import optimized module."""
@@ -521,60 +518,97 @@ def call_ai_verify_subprocess(claim_text: str) -> Dict[str, Any]:
     """
     raise NotImplementedError("Subprocess method not fully implemented - use direct method")
 # Public API
-# ===========================
 
 def call_ai_verify(claim_text: str, additional_evidence: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
-    MAIN ENTRY POINT dengan improved logic.
-    
-    Args:
-        claim_text: Teks klaim yang akan diverifikasi
-        additional_evidence: Optional dict berisi evidence tambahan dari user dispute:
-            - doi: DOI jurnal dari user
-            - url: URL sumber dari user  
-            - abstract: Abstract/konten yang sudah di-fetch
-            - title: Judul jurnal
+    Public API untuk verifikasi claim.
+    Otomatis fallback ke method lain jika script tidak ditemukan.
     """
-    if not claim_text or not claim_text.strip():
-        raise ValueError("Claim text cannot be empty")
+    claim_text = normalize_claim_text(claim_text)
     
-    claim_text = claim_text.strip()
+    logger.info(f"🔍 Verifying claim: {claim_text[:100]}...")
     
-    logger.info("="*80)
-    logger.info(f" NEW VERIFICATION REQUEST")
-    logger.info(f"   Claim: {claim_text[:100]}")
-    if additional_evidence:
-        logger.info(f"   Additional Evidence: DOI={additional_evidence.get('doi', 'N/A')}")
-    logger.info("="*80)
-    
-    try:
-        # Jika ada additional evidence (DOI/URL/abstract), selalu gunakan jalur with_evidence
-        if additional_evidence:
-            result = call_ai_verify_with_evidence(claim_text, additional_evidence)
-        else:
+    # Method 1: Direct import (FASTEST) - jika script ada
+    if VERIFY_SCRIPT.exists():
+        try:
             result = call_ai_verify_direct_optimized(claim_text)
-            
-        normalized = normalize_ai_response(result, claim_text=claim_text)
+            if result and result.get('label'):
+                return normalize_ai_response(result, claim_text)
+        except Exception as e:
+            logger.warning(f"Direct import failed: {e}, trying subprocess...")
+    
+    # Method 2: Subprocess (jika script ada tapi import gagal)
+    if VERIFY_SCRIPT.exists():
+        try:
+            result = call_ai_verify_subprocess(claim_text)
+            if result and result.get('label'):
+                return normalize_ai_response(result, claim_text)
+        except Exception as e:
+            logger.warning(f"Subprocess failed: {e}, using direct AI call...")
+    
+    # Method 3: Direct AI call (FALLBACK - SELALU TERSEDIA)
+    logger.info("Using direct AI call method")
+    result = call_ai_direct(claim_text, additional_evidence)
+    return normalize_ai_response(result, claim_text)
+
+def call_ai_direct(claim_text: str, additional_evidence: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Direct call ke AI API tanpa menggunakan training script.
+    Ini adalah fallback method yang selalu tersedia.
+    """
+    import os
+    from google import genai
+    
+    client = genai.Client(api_key=os.getenv('GEMINI_API_KEY'))
+    
+    prompt = f"""You are a health claim verification expert.
+
+Claim to verify: "{claim_text}"
+
+Analyze this claim and respond with JSON:
+{{
+    "label": "Supported|Refuted|Not Enough Info",
+    "confidence": 0.0-1.0,
+    "summary": "brief explanation",
+    "sources": [
+        {{"title": "...", "url": "...", "doi": "..."}}
+    ]
+}}
+
+Base your analysis on scientific evidence."""
+
+    try:
+        response = client.models.generate_content(
+            model='gemini-2.0-flash-exp',
+            contents=prompt,
+            config={
+                'temperature': 0.3,
+                'max_output_tokens': 2048,
+            }
+        )
         
-        logger.info(f" Final Result:")
-        logger.info(f"   Label: {normalized['label']}")
-        logger.info(f"   Confidence: {normalized.get('confidence', 'N/A')}")
-        logger.info(f"   Sources: {len(normalized.get('sources', []))}")
+        # Parse JSON dari response
+        import json
+        result_text = response.text.strip()
         
-        return normalized
+        # Hapus markdown code block jika ada
+        if result_text.startswith('```'):
+            result_text = result_text.split('```')[1]
+            if result_text.startswith('json'):
+                result_text = result_text[4:]
+        
+        result = json.loads(result_text.strip())
+        return result
         
     except Exception as e:
-        logger.error(f" Verification failed: {e}")
-        
+        logger.error(f"Direct AI call failed: {e}")
+        # Return minimal valid response
         return {
-            "label": "unverified",
-            "summary": f"Verification failed: {str(e)[:200]}",
-            "confidence": None,
-            "sources": [],
-            "_error": True,
-            "_error_message": str(e)
+            'label': 'Not Enough Info',
+            'confidence': 0.5,
+            'summary': f'Unable to verify claim due to technical error: {str(e)}',
+            'sources': []
         }
-
 
 def call_ai_verify_with_evidence(claim_text: str, evidence: Dict[str, Any]) -> Dict[str, Any]:
     """

@@ -1,5 +1,7 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ||'https://api.healthify.cloud/api';
 
+console.log('API_BASE_URL:', API_BASE_URL);
+
 // Handle API response dan error
 const handleResponse = async (response) => {
     if (!response.ok) {

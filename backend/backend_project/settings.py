@@ -126,36 +126,46 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'backend_project.wsgi.application'
 
-# Database
-_postgres_required_env = ["DB_NAME", "DB_USER", "DB_PASSWORD", "DB_HOST", "DB_PORT"]
-_has_postgres_env = all(os.getenv(k) for k in _postgres_required_env)
+# Database Configuration
+# Priority: DATABASE_URL > Individual DB_* vars > SQLite fallback
+DATABASE_URL = os.getenv('DATABASE_URL', '')
 
-if _has_postgres_env:
+if DATABASE_URL:
+    # Railway/Heroku style: use DATABASE_URL
     DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.postgresql',
-            'NAME': os.getenv('DB_NAME'),
-            'USER': os.getenv('DB_USER'),
-            'PASSWORD': os.getenv('DB_PASSWORD'),
-            'HOST': os.getenv('DB_HOST'),
-            'PORT': os.getenv('DB_PORT'),
-        }
-    }
-elif os.getenv('DATABASE_URL'):
-    DATABASES = {
-        'default': dj_database_url.config(
-            default=os.getenv('DATABASE_URL'),
+        'default': dj_database_url.parse(
+            DATABASE_URL,
             conn_max_age=600,
             conn_health_checks=True,
         )
     }
 else:
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
+    # Check for individual PostgreSQL environment variables
+    _db_name = os.getenv('DB_NAME') or os.getenv('PGDATABASE')
+    _db_user = os.getenv('DB_USER') or os.getenv('PGUSER')
+    _db_password = os.getenv('DB_PASSWORD') or os.getenv('PGPASSWORD')
+    _db_host = os.getenv('DB_HOST') or os.getenv('PGHOST')
+    _db_port = os.getenv('DB_PORT') or os.getenv('PGPORT', '5432')
+    
+    if all([_db_name, _db_user, _db_password, _db_host]):
+        DATABASES = {
+            'default': {
+                'ENGINE': 'django.db.backends.postgresql',
+                'NAME': _db_name,
+                'USER': _db_user,
+                'PASSWORD': _db_password,
+                'HOST': _db_host,
+                'PORT': _db_port,
+            }
         }
-    }
+    else:
+        # Fallback to SQLite for local development
+        DATABASES = {
+            'default': {
+                'ENGINE': 'django.db.backends.sqlite3',
+                'NAME': BASE_DIR / 'db.sqlite3',
+            }
+        }
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
@@ -204,6 +214,11 @@ if frontend_url:
 # Railway: auto-add CORS for railway.app domains
 if railway_domain:
     CORS_ALLOWED_ORIGINS.append(f'https://{railway_domain}')
+
+# Vercel: allow all vercel.app preview deployments
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r'^https://.*\.vercel\.app$',
+]
 
 CORS_ALLOW_CREDENTIALS = True
 
@@ -304,13 +319,6 @@ LOGGING = {
         },
     },
 }
-
-DATABASE_URL = os.getenv('DATABASE_URL')
-
-# Ensure pgvector support
-if DATABASE_URL and 'postgresql' in DATABASE_URL:
-    # Tambahkan engine untuk pgvector
-    DATABASES['default']['ENGINE'] = 'django.db.backends.postgresql'
 
 # Create logs directory if it doesn't exist
 LOGS_DIR = BASE_DIR / 'logs'

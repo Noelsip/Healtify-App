@@ -12,20 +12,23 @@ from typing import Dict, Any, Optional, List
 
 logger = logging.getLogger(__name__)
 
-# Path Configuration
-BACKEND_DIR = Path(__file__).resolve().parent.parent
-PROJECT_ROOT = BACKEND_DIR.parent
-TRAINING_DIR = PROJECT_ROOT / "training"
+# Path Configuration - Handle both local dev and Docker environments
+BACKEND_DIR = Path(__file__).resolve().parent.parent  # /app/ in Docker
+
+# Try multiple possible training locations
+_possible_training_dirs = [
+    BACKEND_DIR / "training",           # Docker: /app/training/
+    BACKEND_DIR.parent / "training",    # Local dev: ../training/
+    Path("/app/training"),              # Docker fallback
+]
+
+TRAINING_DIR = next((d for d in _possible_training_dirs if d.exists()), BACKEND_DIR / "training")
 TRAINING_SCRIPTS_DIR = TRAINING_DIR / "scripts"
 
 VERIFY_SCRIPT = TRAINING_SCRIPTS_DIR / "prompt_and_verify.py"
 
 if not VERIFY_SCRIPT.exists():
-    logger.warning(f"Optimized script not found, using original")
-    VERIFY_SCRIPT = Path("/app/training/scripts/prompt_and_verify.py")
-
-if not VERIFY_SCRIPT.exists():
-    logger.warning(f"Optimized script not found at {VERIFY_SCRIPT}")
+    logger.warning(f"Verification script not found at {VERIFY_SCRIPT}")
     logger.warning("Will use direct AI call method")
 
 

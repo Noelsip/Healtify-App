@@ -128,9 +128,12 @@ WSGI_APPLICATION = 'backend_project.wsgi.application'
 
 # Database Configuration
 # Priority: DATABASE_URL > Individual DB_* vars > SQLite fallback
-DATABASE_URL = os.getenv('DATABASE_URL', '')
+DATABASE_URL = os.getenv('DATABASE_URL', '').strip()
 
-if DATABASE_URL:
+# Validate DATABASE_URL is a real URL (not empty, not unresolved template like ${{...}})
+_is_valid_db_url = DATABASE_URL and DATABASE_URL.startswith(('postgres', 'postgresql', 'mysql', 'sqlite'))
+
+if _is_valid_db_url:
     # Railway/Heroku style: use DATABASE_URL
     DATABASES = {
         'default': dj_database_url.parse(

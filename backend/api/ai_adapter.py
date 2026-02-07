@@ -627,34 +627,42 @@ Panduan label:
 
 Berikan analisis berdasarkan fakta ilmiah, bukan opini."""
 
+    import json
     try:
-        # Use gemini-2.0-flash-exp which has higher free tier limits
-        # Standard gemini-2.0-flash has very limited free tier (10 RPM)
-        response = client.models.generate_content(
-            model='gemini-2.0-flash-exp',  
-            contents=prompt,
-            config={
-                'temperature': 0.2,
-                'max_output_tokens': 2048,
-            }
-        )
-        
-        # Parse JSON dari response
-        import json
+        # Try gemini-1.5-flash first
+        try:
+            response = client.models.generate_content(
+                model='gemini-1.5-flash',
+                contents=prompt,
+                config={
+                    'temperature': 0.2,
+                    'max_output_tokens': 2048,
+                }
+            )
+        except Exception as e:
+            # If model not found, fallback to gemini-1.0-pro
+            if 'NOT_FOUND' in str(e):
+                logger.warning('gemini-1.5-flash not found, falling back to gemini-1.0-pro')
+                response = client.models.generate_content(
+                    model='gemini-1.0-pro',
+                    contents=prompt,
+                    config={
+                        'temperature': 0.2,
+                        'max_output_tokens': 2048,
+                    }
+                )
+            else:
+                raise
         result_text = response.text.strip()
-        
         # Hapus markdown code block jika ada
         if result_text.startswith('```'):
             result_text = result_text.split('```')[1]
             if result_text.startswith('json'):
                 result_text = result_text[4:]
-        
         result = json.loads(result_text.strip())
         return result
-        
     except Exception as e:
         logger.error(f"Direct AI call failed: {e}")
-        # Return minimal valid response
         return {
             'label': 'Not Enough Info',
             'confidence': 0.5,

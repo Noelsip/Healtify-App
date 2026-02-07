@@ -628,10 +628,10 @@ Panduan label:
 Berikan analisis berdasarkan fakta ilmiah, bukan opini."""
 
     try:
-        # Use gemini-1.5-flash for better free tier limits
-        # gemini-2.0-flash has very limited free tier
+        # Use gemini-2.0-flash-exp which has higher free tier limits
+        # Standard gemini-2.0-flash has very limited free tier (10 RPM)
         response = client.models.generate_content(
-            model='gemini-1.5-flash',  
+            model='gemini-2.0-flash-exp',  
             contents=prompt,
             config={
                 'temperature': 0.2,

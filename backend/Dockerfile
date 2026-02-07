@@ -35,8 +35,8 @@ RUN echo "=== Verifying directories ===" && \
 # Create necessary directories
 RUN mkdir -p /app/staticfiles /app/media /app/logs
 
-# Collect static files
-RUN python manage.py collectstatic --noinput || echo "⚠️ collectstatic failed"
+# Collect static files (SECRET_KEY not needed - settings.py handles this)
+RUN DJANGO_SECRET_KEY=temp-build-key python manage.py collectstatic --noinput || echo "⚠️ collectstatic failed"
 
 EXPOSE $PORT
 
@@ -44,9 +44,8 @@ EXPOSE $PORT
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
     CMD curl -f http://localhost:${PORT}/api/health/ || exit 1
 
-# Start command
-CMD python manage.py makemigrations --noinput && \
-    python manage.py migrate --noinput && \
+# Start command - NO makemigrations in production!
+CMD python manage.py migrate --noinput && \
     gunicorn backend_project.wsgi:application \
     --bind 0.0.0.0:${PORT} \
     --workers 2 \

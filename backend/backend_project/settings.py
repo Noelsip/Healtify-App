@@ -11,11 +11,20 @@ import dj_database_url
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
-PROJECT_ROOT = BASE_DIR.parent
-TRAINING_DIR = PROJECT_ROOT / 'training'
+
+# Try multiple possible training directory locations
+_possible_training_dirs = [
+    BASE_DIR / 'training',
+    BASE_DIR.parent / 'training',
+]
+TRAINING_DIR = next((d for d in _possible_training_dirs if d.exists()), BASE_DIR / 'training')
 
 ENV_PATH = TRAINING_DIR / '.env'
-load_dotenv(dotenv_path=ENV_PATH)
+if ENV_PATH.exists():
+    load_dotenv(dotenv_path=ENV_PATH)
+else:
+    # Railway: env vars are injected directly, no .env file needed
+    load_dotenv()  # fallback: load from process env or .env in cwd
 
 # Email Configuration (di bagian bawah file, sebelum LOGGING)
 EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.smtp.EmailBackend')
@@ -40,10 +49,14 @@ if os.getenv('DEBUG', 'True') == 'True':
     
 
 # SECURITY WARNING
-SECRET_KEY = os.getenv('DJANGO_SECRET_KEY')
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', '')
 
-if not SECRET_KEY:
+# Allow build phase (collectstatic) to run without SECRET_KEY
+_is_collecting_static = 'collectstatic' in ' '.join(os.sys.argv)
+if not SECRET_KEY and not _is_collecting_static:
     raise ValueError("The DJANGO_SECRET_KEY environment variable is not set.")
+if not SECRET_KEY:
+    SECRET_KEY = 'temporary-key-for-collectstatic-only'
 
 # SECURITY WARNING
 DEBUG = os.getenv('DEBUG', 'False') == 'True'
@@ -54,11 +67,13 @@ ALLOWED_HOSTS = [
     "api.healthify.cloud",
     "localhost",
     "127.0.0.1",
+    ".railway.app",  # Railway auto-generated domains
 ]
 
-railway_domain = os.getenv('RAILWAY_STATIC_URL')
+# Railway injects RAILWAY_PUBLIC_DOMAIN (without scheme)
+railway_domain = os.getenv('RAILWAY_PUBLIC_DOMAIN', '')
 if railway_domain:
-    ALLOWED_HOSTS.append(railway_domain.replace('https://', '').replace('http://', ''))
+    ALLOWED_HOSTS.append(railway_domain)
 
 # Application definition
 INSTALLED_APPS = [
@@ -81,10 +96,10 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
-    'django.middleware.common.CommonMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
@@ -184,10 +199,13 @@ CORS_ALLOWED_ORIGINS = [
 
 frontend_url = os.getenv('FRONTEND_URL')
 if frontend_url:
-    CORS_ALLOWED_ORIGINS.append(frontend_url)
+    CORS_ALLOWED_ORIGINS.append(frontend_url.rstrip('/'))
 
-# mode dev bukan mode prod
-CORS_ALLOW_CREDENTIALS = False
+# Railway: auto-add CORS for railway.app domains
+if railway_domain:
+    CORS_ALLOWED_ORIGINS.append(f'https://{railway_domain}')
+
+CORS_ALLOW_CREDENTIALS = True
 
 CORS_ALLOW_METHODS = [
     'GET',

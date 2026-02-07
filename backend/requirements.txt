@@ -26,3 +26,12 @@ google-genai
 langchain-google-genai
 openai>=1.0.0
 semanticscholar
+
+# Training script dependencies (for AI verification)
+PyMuPDF
+sentence-transformers
+faiss-cpu
+tqdm
+pandas
+numpy
+scikit-learn

@@ -15,9 +15,8 @@ __pycache__/
 
 # Django specific
 backend/db.sqlite3
-backend/*/migrations/*
-backend/api/migrations/*
-!backend/*/migrations/__init__.py
+# NOTE: Migrations HARUS di-commit ke git untuk production deployment
+# Jangan ignore migrations!
 
 # Frontend dependencies dan build
 frontend/node_modules

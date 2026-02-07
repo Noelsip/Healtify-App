@@ -18,11 +18,11 @@ PROJECT_ROOT = BACKEND_DIR.parent
 TRAINING_DIR = PROJECT_ROOT / "training"
 TRAINING_SCRIPTS_DIR = TRAINING_DIR / "scripts"
 
-VERIFY_SCRIPT = TRAINING_SCRIPTS_DIR / "prompt_and_verify_optimized.py"
+VERIFY_SCRIPT = TRAINING_SCRIPTS_DIR / "prompt_and_verify.py"
 
 if not VERIFY_SCRIPT.exists():
     logger.warning(f"Optimized script not found, using original")
-    VERIFY_SCRIPT = Path("/app/training/scripts/prompt_and_verify_optimized.py")
+    VERIFY_SCRIPT = Path("/app/training/scripts/prompt_and_verify.py")
 
 if not VERIFY_SCRIPT.exists():
     logger.warning(f"Optimized script not found at {VERIFY_SCRIPT}")

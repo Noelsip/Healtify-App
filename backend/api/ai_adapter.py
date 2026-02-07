@@ -422,11 +422,36 @@ def parse_json_from_output(output: str) -> Optional[Dict[str, Any]]:
     logger.warning("Failed to parse JSON from output")
     return None
 
-# Direct Import Methods (FASTEST)
+# Check if training modules are available (lightweight check)
+def _training_modules_available() -> bool:
+    """Check if training modules dependencies are available."""
+    try:
+        import fitz  # PyMuPDF - required by loader.py
+        import sentence_transformers  # required for embeddings
+        return True
+    except ImportError:
+        return False
+
+# Cache the check result
+_TRAINING_MODULES_OK = None
+
+def training_modules_available() -> bool:
+    """Cached check for training module availability."""
+    global _TRAINING_MODULES_OK
+    if _TRAINING_MODULES_OK is None:
+        _TRAINING_MODULES_OK = _training_modules_available()
+        if not _TRAINING_MODULES_OK:
+            logger.info("Training modules not available - using direct AI method")
+    return _TRAINING_MODULES_OK
+
+# Direct Import Methods (FASTEST - only if dependencies available)
 
 def get_optimized_module():
     """Lazy import optimized module."""
     global _optimized_module
+    
+    if not training_modules_available():
+        raise ImportError("Training module dependencies not installed")
     
     if _optimized_module is None:
         if str(TRAINING_SCRIPTS_DIR) not in sys.path:
@@ -531,7 +556,13 @@ def call_ai_verify(claim_text: str, additional_evidence: Optional[Dict[str, Any]
     
     logger.info(f"🔍 Verifying claim: {claim_text[:100]}...")
     
-    # Method 1: Direct import (FASTEST) - jika script ada
+    # Skip optimized methods if training modules not available (Railway production)
+    if not training_modules_available():
+        logger.info("Using direct AI call method (training modules not available)")
+        result = call_ai_direct(claim_text, additional_evidence)
+        return normalize_ai_response(result, claim_text)
+    
+    # Method 1: Direct import (FASTEST) - jika script ada dan modules tersedia
     if VERIFY_SCRIPT.exists():
         try:
             result = call_ai_verify_direct_optimized(claim_text)
@@ -562,30 +593,46 @@ def call_ai_direct(claim_text: str, additional_evidence: Optional[Dict[str, Any]
     import os
     from google import genai
     
-    client = genai.Client(api_key=os.getenv('GEMINI_API_KEY'))
+    api_key = os.getenv('GEMINI_API_KEY')
+    if not api_key:
+        logger.error("GEMINI_API_KEY not set")
+        return {
+            'label': 'unverified',
+            'confidence': None,
+            'summary': 'API key not configured',
+            'sources': []
+        }
     
-    prompt = f"""You are a health claim verification expert.
+    client = genai.Client(api_key=api_key)
+    
+    # Enhanced prompt for health claim verification
+    prompt = f"""Kamu adalah ahli verifikasi klaim kesehatan. Verifikasi klaim berikut berdasarkan konsensus ilmiah dan jurnal medis.
 
-Claim to verify: "{claim_text}"
+Klaim: "{claim_text}"
 
-Analyze this claim and respond with JSON:
+Analisis klaim ini dan berikan respons dalam format JSON:
 {{
-    "label": "Supported|Refuted|Not Enough Info",
+    "label": "valid|hoax|uncertain",
     "confidence": 0.0-1.0,
-    "summary": "brief explanation",
+    "summary": "Penjelasan singkat dalam bahasa Indonesia mengapa klaim ini valid/hoax/uncertain. Jelaskan bukti ilmiah yang mendukung atau menyanggah.",
     "sources": [
-        {{"title": "...", "url": "...", "doi": "..."}}
+        {{"title": "Judul sumber/studi", "url": "link jika ada", "doi": "DOI jika ada"}}
     ]
 }}
 
-Base your analysis on scientific evidence."""
+Panduan label:
+- "valid": Klaim didukung oleh bukti ilmiah kuat
+- "hoax": Klaim bertentangan dengan konsensus ilmiah
+- "uncertain": Tidak cukup bukti atau masih diperdebatkan
+
+Berikan analisis berdasarkan fakta ilmiah, bukan opini."""
 
     try:
         response = client.models.generate_content(
-            model='gemini-2.0-flash-exp',
+            model='gemini-2.0-flash',  
             contents=prompt,
             config={
-                'temperature': 0.3,
+                'temperature': 0.2,
                 'max_output_tokens': 2048,
             }
         )
